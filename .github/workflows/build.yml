@@ -21,17 +21,9 @@ jobs:
           pip install pyinstaller
           pip install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation scapy
       - name: Build macOS binary
-        run: |
-          pyinstaller --onefile --name wifi-toolkit-macos 
-            --add-data "scripts:scripts" 
-            --add-data "wordlists/online:wordlists/online" 
-            --hidden-import CoreWLAN 
-            --hidden-import CoreLocation 
-            scripts/main.py
+        run: pyinstaller --onefile --name wifi-toolkit-macos --add-data "scripts:scripts" --add-data "wordlists/online:wordlists/online" --hidden-import CoreWLAN --hidden-import CoreLocation scripts/main.py
       - name: Build Go scanner
-        run: |
-          cd go_tools/scanner
-          go build -o ../../dist/wifi-scanner-macos .
+        run: cd go_tools/scanner && go build -o ../../dist/wifi-scanner-macos .
       - uses: actions/upload-artifact@v4
         with:
           name: macos-build
@@ -47,18 +39,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: |
-          pip install pyinstaller scapy
+        run: pip install pyinstaller scapy
       - name: Build Windows binary
-        run: |
-          pyinstaller --onefile --name wifi-toolkit-windows `
-            --add-data "scripts;scripts" `
-            --add-data "wordlists/online;wordlists/online" `
-            scripts/main.py
+        run: pyinstaller --onefile --name wifi-toolkit-windows --add-data "scripts;scripts" --add-data "wordlists/online;wordlists/online" scripts/main.py
       - name: Build Go scanner
-        run: |
-          cd go_tools/scanner
-          go build -o ../../dist/wifi-scanner-windows.exe .
+        run: cd go_tools/scanner && go build -o ../../dist/wifi-scanner-windows.exe .
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
@@ -74,18 +59,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: |
-          pip install pyinstaller scapy
+        run: pip install pyinstaller scapy
       - name: Build Linux binary
-        run: |
-          pyinstaller --onefile --name wifi-toolkit-linux 
-            --add-data "scripts:scripts" 
-            --add-data "wordlists/online:wordlists/online" 
-            scripts/main.py
+        run: pyinstaller --onefile --name wifi-toolkit-linux --add-data "scripts:scripts" --add-data "wordlists/online:wordlists/online" scripts/main.py
       - name: Build Go scanner
-        run: |
-          cd go_tools/scanner
-          go build -o ../../dist/wifi-scanner-linux .
+        run: cd go_tools/scanner && go build -o ../../dist/wifi-scanner-linux .
       - uses: actions/upload-artifact@v4
         with:
           name: linux-build
@@ -98,26 +76,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           name: macos-build
           path: release/macos
-
       - uses: actions/download-artifact@v4
         with:
           name: windows-build
           path: release/windows
-
       - uses: actions/download-artifact@v4
         with:
           name: linux-build
           path: release/linux
-
       - name: Package wordlists
-        run: |
-          tar czf release/wordlists-online.tar.gz -C wordlists/online .
-
+        run: tar czf release/wordlists-online.tar.gz -C wordlists/online .
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -130,23 +102,21 @@ jobs:
             release/linux/wifi-scanner-linux
             release/wordlists-online.tar.gz
           body: |
-            ## WiFi 安全测试工具包
+            ## WiFi 安全测试工具包 v3.0
 
             ### 下载说明
-            - **macOS**: 下载 `wifi-toolkit-macos` + `wifi-scanner-macos`
-            - **Windows**: 下载 `wifi-toolkit-windows.exe` + `wifi-scanner-windows.exe`
-            - **Linux**: 下载 `wifi-toolkit-linux` + `wifi-scanner-linux`
-            - **密码字典**: 下载 `wordlists-online.tar.gz`
+            | 平台 | 主程序 | 扫描器 |
+            | --- | --- | --- |
+            | macOS | wifi-toolkit-macos | wifi-scanner-macos |
+            | Windows | wifi-toolkit-windows.exe | wifi-scanner-windows.exe |
+            | Linux | wifi-toolkit-linux | wifi-scanner-linux |
 
-            ### 快速使用
-            ```bash
-            chmod +x wifi-toolkit-macos
-            ./wifi-toolkit-macos
-            ```
+            另外下载 `wordlists-online.tar.gz` 获取密码字典
 
             ### 源码使用（推荐）
             ```bash
-            git clone 本仓库
+            git clone https://github.com/1837620622/wifi-security-toolkit.git
+            cd wifi-security-toolkit
             pip3 install -r requirements.txt
             python3 scripts/main.py
             ```
