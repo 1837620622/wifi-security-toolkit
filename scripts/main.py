@@ -48,6 +48,7 @@ def banner():
   [F] 自动破解流水线（一键多轮智能攻击）
   [G] 批量WiFi破解（扫描全部→逐个攻击→密码保存）
   [H] 闪电破解（默认密码计算+零延迟扫射）
+  [I] 密码数据库查询（WiFi万能钥匙共享库+WPS PIN计算）
 
   ─── 辅助工具 ───
   [6] 网络分析（连接后使用）
@@ -341,6 +342,30 @@ def menu_lightning_crack():
         run_script("lightning_crack.py", ["--show-cracked"])
 
 
+def menu_db_query():
+    """WiFi密码数据库查询"""
+    print(f"{CYAN}[WiFi密码数据库查询 v1.0]{RESET}")
+    print("  [1] 自动扫描周围WiFi + 批量查询密码库")
+    print("  [2] 手动指定SSID+BSSID查询")
+    print("  [3] 根据BSSID计算WPS PIN码")
+    print("  [4] 查看已破解的WiFi")
+    print()
+    c = input("  选择 (1-4): ").strip()
+    if c == "1":
+        run_script("wifi_db_query.py", ["--scan"])
+    elif c == "2":
+        ssid = input("  输入SSID: ").strip()
+        bssid = input("  输入BSSID(MAC地址 如 AA:BB:CC:DD:EE:FF): ").strip()
+        if ssid and bssid:
+            run_script("wifi_db_query.py", ["--ssid", ssid, "--bssid", bssid])
+    elif c == "3":
+        bssid = input("  输入BSSID(MAC地址): ").strip()
+        if bssid:
+            run_script("wifi_db_query.py", ["--wps-pin", bssid])
+    elif c == "4":
+        run_script("wifi_db_query.py", ["--show-cracked"])
+
+
 def menu_batch_crack():
     """批量WiFi破解"""
     print(f"{CYAN}[批量WiFi破解 v1.0]{RESET}")
@@ -387,6 +412,7 @@ def main():
         "f": menu_auto_crack,
         "g": menu_batch_crack,
         "h": menu_lightning_crack,
+        "i": menu_db_query,
     }
 
     while True:

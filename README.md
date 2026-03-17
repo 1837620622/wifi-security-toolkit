@@ -25,6 +25,7 @@
 | **自动破解流水线** | auto_crack.py | **多轮智能攻击：品牌识别→策略选择→MAC轮换→自动攻击（v4.0新增）** | Python |
 | **批量破解器** | batch_crack.py | **自动扫描全部家庭WiFi→逐个攻击→密码统一保存（v4.0新增）** | Python |
 | **闪电破解器** | lightning_crack.py | **默认密码计算器+零延迟扫射，每目标5-10秒（v4.0新增）** | Python |
+| **密码数据库查询** | wifi_db_query.py | **WiFi万能钥匙共享库查询+WPS PIN计算器（v4.0新增）** | Python |
 | 网络分析器 | network_analyzer.py | 网关探测/局域网设备扫描/测速/路由器识别 | Python |
 | 社工字典 | smart_dict.py | 根据目标个人信息（姓名/生日/手机号）生成定向字典 | Python |
 | MAC 伪装 | mac_spoof.py | 随机化/恢复 MAC 地址，规避 AP 封禁 | Python |
@@ -394,6 +395,26 @@ python3 scripts/lightning_crack.py --show-default-pwds "TP-LINK_FB0E"
 - **默认密码计算器**：根据SSID品牌特征算出路由器默认密码（TP-Link/CMCC/Tenda/FAST/MERCURY等）
 - **零延迟扫射**：每个目标仅试5-20条最可能的密码，无等待间隔
 
+### 密码数据库查询（v4.0 新增）
+
+不用爆破，直接从WiFi万能钥匙共享密码库查询已知密码。秒级查询，无需任何攻击行为。
+
+```bash
+# 自动扫描周围WiFi + 批量查询密码库
+python3 scripts/wifi_db_query.py --scan
+
+# 查询指定WiFi的密码
+python3 scripts/wifi_db_query.py --ssid "WiFi名" --bssid "AA:BB:CC:DD:EE:FF"
+
+# 根据MAC地址计算WPS PIN码
+python3 scripts/wifi_db_query.py --wps-pin "AA:BB:CC:DD:EE:FF"
+```
+
+数据库查询特性：
+- **WiFi万能钥匙共享库**：查询约8亿装机量用户分享的WiFi密码
+- **WPS PIN计算器**：根据MAC地址计算路由器WPS PIN码（多种算法）
+- **秒级查询**：纯HTTP请求，不需要任何攻击行为
+
 ### 位置权限修复
 
 ```bash
@@ -478,6 +499,7 @@ Wi-Fi破解/
 │   ├── auto_crack.py                  # ★ v4.0 自动化多轮破解流水线
 │   ├── batch_crack.py                 # ★ v4.0 批量WiFi串行破解器
 │   ├── lightning_crack.py             # ★ v4.0 闪电破解器（默认密码+零延迟）
+│   ├── wifi_db_query.py               # ★ v4.0 密码数据库查询（万能钥匙+WPS PIN）
 │   ├── network_analyzer.py            # 网络分析器
 │   ├── smart_dict.py                  # 社工字典生成器（CUPP风格）
 │   ├── mac_spoof.py                   # MAC 地址伪装
