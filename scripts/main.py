@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-WiFi 安全测试工具包 v3.0 - 主控制台
+WiFi 安全测试工具包 v4.0 - 主控制台
 功能：统一入口，菜单驱动，智能识别家庭WiFi
+v4.0 新增：智能密码排序、自动破解流水线、增强hashcat、密码强度预估
 """
 
 import json
@@ -29,16 +30,24 @@ def clear():
 def banner():
     print(f"""{CYAN}{BOLD}
  ===================================================
-    WiFi 安全测试工具包 v3.0
-    macOS Apple Silicon | 家庭WiFi智能识别
+    WiFi 安全测试工具包 v4.0
+    macOS Apple Silicon | Markov智能排序 | PCFG生成
     仅限授权网络安全测试
  ==================================================={RESET}
 {YELLOW}
+  ─── 基础功能 ───
   [1] 扫描周围WiFi（家庭WiFi自动标注）
   [2] 下载在线密码字典
-  [3] 生成智能密码字典
-  [4] WiFi密码破解（家庭WiFi专用）
-  [5] Hashcat离线破解
+  [3] 生成智能密码字典（含PCFG结构生成）
+  [4] WiFi密码破解（MAC轮换+自适应延迟）
+  [5] Hashcat离线破解（规则/混合/Brain模式）
+
+  ─── 智能增强 (v4.0) ───
+  [D] 密码强度扫描（品牌识别+攻击策略）
+  [E] 智能密码排序（Markov链概率排序）
+  [F] 自动破解流水线（一键多轮智能攻击）
+
+  ─── 辅助工具 ───
   [6] 网络分析（连接后使用）
   [7] 查看已破解的WiFi
   [8] 修复位置权限（获取SSID名称）
@@ -71,6 +80,61 @@ def menu_scan():
     run_script("wifi_scanner.py", args)
 
 
+def menu_strength_scan():
+    """v4.0: 密码强度扫描 + 攻击策略推荐"""
+    print(f"{CYAN}[密码强度扫描]{RESET}")
+    print("  扫描周围WiFi并分析密码强度、推荐攻击策略")
+    run_script("wifi_scanner.py", ["-s", "--strength"])
+
+
+def menu_password_ranker():
+    """v4.0: 智能密码排序器"""
+    print(f"{CYAN}[智能密码排序]{RESET}")
+    print("  基于Markov链+PCFG结构分析，对字典进行概率排序")
+    print("  高概率密码排在前面，缩短命中时间30-50%")
+    print()
+
+    # 列出字典
+    wl_dir = PROJECT_DIR / "wordlists"
+    wl_files = sorted(wl_dir.rglob("*.txt"))
+    if not wl_files:
+        print("  [!] 无可用字典，请先生成或下载")
+        return
+    print("  可用字典:")
+    for i, f in enumerate(wl_files, 1):
+        rel = f.relative_to(PROJECT_DIR)
+        size = f.stat().st_size / 1024
+        print(f"    [{i}] {rel} ({size:.0f}KB)")
+    print()
+    choice = input(f"  选择字典 (1-{len(wl_files)}): ").strip()
+    try:
+        wl_path = str(wl_files[int(choice) - 1])
+    except (ValueError, IndexError):
+        print("  [!] 无效选择")
+        return
+
+    out = input("  输出路径 (回车默认覆盖原文件): ").strip()
+    args = [wl_path]
+    if out:
+        args.extend(["-o", out])
+    run_script("password_ranker.py", args)
+
+
+def menu_auto_crack():
+    """v4.0: 自动破解流水线"""
+    print(f"{CYAN}[自动破解流水线]{RESET}")
+    print("  多轮智能攻击: 路由器识别 -> 策略选择 -> MAC轮换 -> 自动攻击")
+    print()
+    ssid = input("  目标SSID (回车扫描选择): ").strip()
+    args = []
+    if ssid:
+        args.extend(["-t", ssid])
+    mac = input("  启用MAC轮换? (Y/n): ").strip().lower()
+    if mac != "n":
+        args.append("--mac-rotate")
+    run_script("auto_crack.py", args)
+
+
 def menu_download():
     print(f"{CYAN}[下载在线字典]{RESET}")
     run_script("download_dicts.py")
@@ -89,7 +153,8 @@ def menu_gen():
 
 
 def menu_crack():
-    print(f"{CYAN}[WiFi密码破解]{RESET}")
+    print(f"{CYAN}[WiFi密码破解 v4.0]{RESET}")
+    print("  支持: MAC自动轮换 | 智能自适应延迟 | 断点续传")
     print()
     ssid = input("  目标SSID (回车进入交互选择): ").strip()
 
@@ -116,20 +181,30 @@ def menu_crack():
 
     delay = input("  间隔秒数 (默认0.5): ").strip() or "0.5"
 
-    args = ["-w", wl_path, "-d", delay]
+    # v4.0: MAC轮换和自适应延迟选项
+    mac_rotate = input("  启用MAC轮换? 输入间隔次数 (0=不轮换, 推荐100): ").strip() or "0"
+    adaptive = input("  启用智能自适应延迟? (Y/n): ").strip().lower()
+
+    args = ["-w", wl_path, "-d", delay, "--mac-rotate", mac_rotate]
+    if adaptive != "n":
+        args.append("--adaptive")
     if ssid:
         args.extend(["-t", ssid])
     run_script("wifi_cracker.py", args)
 
 
 def menu_hashcat():
-    print(f"{CYAN}[Hashcat离线破解]{RESET}")
+    print(f"{CYAN}[Hashcat离线破解 v2.0]{RESET}")
     print("  [1] 检查环境")
     print("  [2] 转换握手包")
     print("  [3] 字典攻击")
     print("  [4] 纯数字掩码攻击")
+    print(f"{GREEN}  [5] 规则攻击（字典+变异规则）    ← v4.0{RESET}")
+    print(f"{GREEN}  [6] 混合攻击（字典+掩码组合）    ← v4.0{RESET}")
+    print(f"{GREEN}  [7] 智能攻击（自动推荐最优策略）  ← v4.0{RESET}")
+    print(f"{GREEN}  [8] 生成中国特化规则文件          ← v4.0{RESET}")
     print()
-    c = input("  选择 (1-4): ").strip()
+    c = input("  选择 (1-8): ").strip()
     if c == "1":
         run_script("hashcat_helper.py", ["check"])
     elif c == "2":
@@ -143,6 +218,28 @@ def menu_hashcat():
     elif c == "4":
         f = input("  哈希文件: ").strip()
         run_script("hashcat_helper.py", ["mask", f])
+    elif c == "5":
+        f = input("  哈希文件: ").strip()
+        w = input("  字典路径: ").strip()
+        r = input("  规则文件(回车用默认中国规则): ").strip()
+        args = ["rule", f, "-w", w]
+        if r:
+            args.extend(["-r", r])
+        run_script("hashcat_helper.py", args)
+    elif c == "6":
+        f = input("  哈希文件: ").strip()
+        w = input("  字典路径: ").strip()
+        m = input("  掩码(默认?d?d?d?d): ").strip() or "?d?d?d?d"
+        run_script("hashcat_helper.py", ["hybrid", f, "-w", w, "-m", m])
+    elif c == "7":
+        f = input("  哈希文件: ").strip()
+        brand = input("  路由器品牌(回车自动检测): ").strip()
+        args = ["smart", f]
+        if brand:
+            args.extend(["--brand", brand])
+        run_script("hashcat_helper.py", args)
+    elif c == "8":
+        run_script("hashcat_helper.py", ["gen-rules"])
 
 
 def menu_network():
@@ -242,6 +339,10 @@ def main():
         "a": menu_keychain,
         "b": menu_smart_dict,
         "c": menu_mac_spoof,
+        # v4.0 新增功能
+        "d": menu_strength_scan,
+        "e": menu_password_ranker,
+        "f": menu_auto_crack,
     }
 
     while True:

@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-WiFi 网络扫描器 v2.0
+WiFi 网络扫描器 v3.0
 核心升级：
   1. 智能识别家庭WiFi vs 企业/校园WiFi
   2. 多源SSID获取（CoreWLAN + system_profiler + networksetup）
   3. 安全类型精确分类
+  v3.0 新增：
+  4. 密码强度预估（根据路由器品牌+SSID模式推断）
+  5. 攻击策略推荐（针对每个WiFi推荐最优破解方案）
+学术参考：
+  - WiFi Handshake: analysis of password patterns (Carballal et al., 2022)
+  - Advanced Persistent Threats and WLAN Security (Alamleh et al., 2025)
 适配：macOS Apple Silicon
 """
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -217,6 +224,167 @@ def scan_system_profiler():
 
 
 # ============================================================
+# 密码强度预估 + 攻击策略推荐
+# ============================================================
+
+# 路由器品牌识别规则：(SSID关键词, 品牌名, 默认密码模式, 难度, 推荐策略)
+ROUTER_BRANDS = [
+    ("TP-LINK", "TP-Link", "8位纯数字", "低", "8位纯数字掩码攻击"),
+    ("Tenda", "腾达", "8位纯数字", "低", "8位纯数字掩码攻击"),
+    ("MERCURY", "水星", "8位纯数字", "低", "8位纯数字掩码攻击"),
+    ("FAST", "迅捷", "8位纯数字", "低", "8位纯数字掩码攻击"),
+    ("CMCC", "中国移动", "8位纯数字(MAC)", "低", "8位纯数字掩码"),
+    ("ChinaNet", "中国电信", "8位纯数字", "低", "8位纯数字掩码"),
+    ("ChinaUnicom", "中国联通", "8位纯数字", "低", "8位纯数字掩码"),
+    ("HUAWEI", "华为", "8位字母数字混合", "中", "字典+规则变异攻击"),
+    ("HONOR", "荣耀", "8位字母数字混合", "中", "字典+规则变异攻击"),
+    ("MiWiFi", "小米", "用户自设", "中", "社工字典+通用字典"),
+    ("Xiaomi", "小米", "用户自设", "中", "社工字典+通用字典"),
+    ("Redmi", "Redmi", "用户自设", "中", "社工字典+通用字典"),
+    ("NETGEAR", "Netgear", "12位随机", "高", "hashcat离线破解"),
+    ("ASUS", "华硕", "用户自设", "中", "社工字典+通用字典"),
+    ("D-Link", "D-Link", "8位随机", "中", "字典+混合攻击"),
+    ("Ruijie", "锐捷", "8位纯数字", "低", "8位纯数字掩码"),
+    ("H3C", "新华三", "8位字母数字", "中", "字典+规则变异攻击"),
+]
+
+
+def estimate_password_strength(ssid, security=""):
+    """
+    根据SSID和安全类型预估密码强度和攻击策略
+
+    返回: {
+        "brand": 品牌名,
+        "default_pattern": 默认密码模式,
+        "difficulty": 难度等级（低/中/高/极高）,
+        "strategy": 推荐攻击策略,
+        "est_time": 预估破解时间,
+        "note": 备注,
+    }
+    """
+    result = {
+        "brand": "未知",
+        "default_pattern": "未知",
+        "difficulty": "中",
+        "strategy": "通用字典攻击",
+        "est_time": "未知",
+        "note": "",
+    }
+
+    if not ssid:
+        result["note"] = "SSID被隐藏，无法识别品牌"
+        return result
+
+    ssid_upper = ssid.upper()
+
+    # 路由器品牌识别
+    for keyword, brand, pattern, diff, strategy in ROUTER_BRANDS:
+        if keyword.upper() in ssid_upper:
+            result["brand"] = brand
+            result["default_pattern"] = pattern
+            result["difficulty"] = diff
+            result["strategy"] = strategy
+            break
+
+    # WPA3检测
+    sec_upper = security.upper()
+    if "WPA3" in sec_upper:
+        result["difficulty"] = "极高"
+        result["strategy"] = "WPA3抗离线破解，仅支持在线慢速尝试"
+        result["note"] = "WPA3 SAE协议，无法进行离线破解"
+        result["est_time"] = "极长"
+        return result
+
+    # 开放网络
+    if "OPEN" in sec_upper or "NONE" in sec_upper or security == "Open":
+        result["difficulty"] = "无"
+        result["strategy"] = "无需密码，直接连接"
+        result["est_time"] = "0秒"
+        return result
+
+    # 企业网络
+    if "ENTERPRISE" in sec_upper or "802.1X" in sec_upper:
+        result["difficulty"] = "极高"
+        result["strategy"] = "企业认证，不适用密码破解"
+        result["note"] = "需要RADIUS服务器凭证"
+        return result
+
+    # 根据品牌估算破解时间
+    if result["difficulty"] == "低":
+        result["est_time"] = "在线~30分钟 / hashcat<1秒"
+    elif result["difficulty"] == "中":
+        result["est_time"] = "在线~数小时 / hashcat~数分钟"
+    elif result["difficulty"] == "高":
+        result["est_time"] = "在线>24小时 / hashcat~数小时"
+    else:
+        result["est_time"] = "未知"
+
+    # SSID模式分析补充
+    if re.search(r'\d{3,}', ssid):
+        result["note"] += "SSID含数字序列，密码可能与之相关; "
+    if any(name in ssid_upper for name in ["WANG", "LI", "ZHANG", "LIU", "CHEN"]):
+        result["note"] += "SSID含姓氏，建议社工字典; "
+
+    return result
+
+
+def display_strength_report(networks):
+    """显示密码强度预估报告"""
+    print()
+    print("=" * 70)
+    print("  密码强度预估 & 攻击策略推荐")
+    print("=" * 70)
+    print()
+
+    # 只分析家庭WiFi
+    home_nets = [n for n in networks if n.get("type") in ("home", "unknown") and n.get("ssid")]
+    if not home_nets:
+        print("  [!] 无可分析的家庭WiFi")
+        return
+
+    # 按难度分组
+    easy = []
+    medium = []
+    hard = []
+
+    for n in home_nets:
+        info = estimate_password_strength(n["ssid"], n.get("security", ""))
+        n["_strength"] = info
+        if info["difficulty"] == "低":
+            easy.append(n)
+        elif info["difficulty"] in ("中",):
+            medium.append(n)
+        else:
+            hard.append(n)
+
+    # 输出推荐攻击目标（按难度从低到高）
+    print(f"  {'#':>3} {'SSID':<22} {'品牌':<8} {'难度':<5} {'推荐策略':<24} {'预估时间'}")
+    print("  " + "-" * 80)
+
+    idx = 0
+    for group_name, group in [("低难度", easy), ("中难度", medium), ("高难度", hard)]:
+        if not group:
+            continue
+        for n in group:
+            idx += 1
+            info = n["_strength"]
+            diff_color = "\033[92m" if info["difficulty"] == "低" else (
+                "\033[93m" if info["difficulty"] == "中" else "\033[91m")
+            print(f"  {idx:>3} {n['ssid']:<22} {info['brand']:<8} "
+                  f"{diff_color}{info['difficulty']:<5}\033[0m "
+                  f"{info['strategy']:<24} {info['est_time']}")
+            if info["note"]:
+                print(f"      \033[96m备注: {info['note'].strip('; ')}\033[0m")
+
+    # 统计摘要
+    print()
+    print(f"  摘要: {len(easy)} 低难度 | {len(medium)} 中难度 | {len(hard)} 高难度")
+    if easy:
+        print(f"  \033[92m推荐优先攻击: {easy[0]['ssid']} ({easy[0]['_strength']['brand']})\033[0m")
+    print()
+
+
+# ============================================================
 # 信号强度可视化
 # ============================================================
 def signal_bar(rssi):
@@ -341,18 +509,20 @@ def scan(save=False, output=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="WiFi 扫描器 v2.0")
+    parser = argparse.ArgumentParser(description="WiFi 扫描器 v3.0")
     parser.add_argument("-c", "--continuous", action="store_true", help="持续扫描")
     parser.add_argument("-i", "--interval", type=int, default=5, help="扫描间隔")
     parser.add_argument("-o", "--output", type=str, help="JSON保存路径")
     parser.add_argument("-s", "--save", action="store_true", help="保存结果")
     parser.add_argument("-a", "--all", action="store_true", help="显示全部网络（含企业）")
     parser.add_argument("--json", action="store_true", help="JSON输出")
+    parser.add_argument("--strength", action="store_true",
+                        help="显示密码强度预估和攻击策略推荐")
     args = parser.parse_args()
 
     if not args.json:
         print("=" * 50)
-        print("  WiFi 扫描器 v2.0 (家庭WiFi智能识别)")
+        print("  WiFi 扫描器 v3.0 (密码强度预估+攻击策略)")
         print("=" * 50)
 
     if args.continuous:
@@ -379,6 +549,9 @@ def main():
             print(json.dumps(clean, ensure_ascii=False, indent=2))
         else:
             display(nets, cur, args.all)
+            # 密码强度预估报告
+            if args.strength:
+                display_strength_report(nets)
             if not any(n["ssid"] for n in nets):
                 print()
                 print("[!] SSID 全部被隐藏（macOS隐私限制）")

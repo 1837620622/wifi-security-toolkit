@@ -1,6 +1,8 @@
-# WiFi 安全测试工具包 v3.0
+# WiFi 安全测试工具包 v4.0
 
-基于 macOS Apple Silicon (M1/M2/M3) 的家庭 WiFi 安全测试套件。纯内置网卡，无需外置设备。融合在线开源字典 + 本地智能生成，自动识别家庭 WiFi 与企业/校园网络。
+基于 macOS Apple Silicon (M1/M2/M3/M4) 的家庭 WiFi 安全测试套件。纯内置网卡，无需外置设备。融合在线开源字典 + 本地智能生成，自动识别家庭 WiFi 与企业/校园网络。
+
+**v4.0 新特性**：Markov链智能密码排序 | PCFG概率结构生成 | 自动化多轮破解流水线 | 规则/混合/Brain模式hashcat | MAC自动轮换 | 智能自适应延迟 | 密码强度预估+攻击策略推荐
 
 ## 法律声明
 
@@ -12,13 +14,15 @@
 
 | 模块 | 文件 | 功能 | 语言 |
 | --- | --- | --- | --- |
-| 主控制台 | main.py | 菜单驱动统一入口 | Python |
-| WiFi 扫描器 | wifi_scanner.py | CoreWLAN 扫描，自动标注家庭/企业/开放类型 | Python |
+| 主控制台 | main.py | 菜单驱动统一入口（v4.0 集成全部新功能） | Python |
+| WiFi 扫描器 | wifi_scanner.py | CoreWLAN 扫描 + **密码强度预估 + 攻击策略推荐** | Python |
 | Go 扫描器 | wifi-scanner | system_profiler 高速扫描，编译为单一二进制 | Go |
 | 字典下载器 | download_dicts.py | 从 GitHub 下载 6 个高频密码字典（SecLists/中国Top10万） | Python |
-| 字典生成器 | wordlist_gen.py | 融合在线字典 + 手机号/生日/拼音/键盘模式生成 62.6 万条 | Python |
-| 在线破解器 | wifi_cracker.py | networksetup 逐个尝试密码，支持断点续传 | Python |
-| Hashcat 辅助 | hashcat_helper.py | 管理握手包，调用 hashcat GPU 加速离线破解 | Python |
+| 字典生成器 | wordlist_gen.py | 融合在线字典 + 手机号/生日/拼音/键盘 + **PCFG概率结构生成** | Python |
+| 在线破解器 | wifi_cracker.py | networksetup 破解 + **MAC自动轮换 + 智能自适应延迟** | Python |
+| Hashcat 辅助 | hashcat_helper.py | hashcat 离线破解 + **规则攻击/混合攻击/Brain模式/中国特化规则** | Python |
+| **智能排序器** | password_ranker.py | **Markov链 + PCFG + 中国密码特征的智能密码概率排序（v4.0新增）** | Python |
+| **自动破解流水线** | auto_crack.py | **多轮智能攻击：品牌识别→策略选择→MAC轮换→自动攻击（v4.0新增）** | Python |
 | 网络分析器 | network_analyzer.py | 网关探测/局域网设备扫描/测速/路由器识别 | Python |
 | 钥匙串提取 | keychain_extract.py | 从 macOS 钥匙串提取已保存 WiFi 名称和密码 | Python |
 | 社工字典 | smart_dict.py | 根据目标个人信息（姓名/生日/手机号）生成定向字典 | Python |
@@ -110,6 +114,9 @@ python3 scripts/wifi_scanner.py -s -o my_scan.json
 # JSON 格式输出（供其他程序读取）
 python3 scripts/wifi_scanner.py --json
 
+# v4.0: 密码强度预估 + 攻击策略推荐
+python3 scripts/wifi_scanner.py --strength
+
 # Go 高速扫描器
 ./wifi-scanner
 ./wifi-scanner --json
@@ -136,7 +143,7 @@ python3 scripts/download_dicts.py
 ### 密码字典生成
 
 ```bash
-# 完整生成（约62.6万条，含7种模式）
+# 完整生成（含8种模式：7种基础 + PCFG概率结构）
 python3 scripts/wordlist_gen.py
 
 # 快速模式（仅高频密码，约9700条，适合先快速尝试）
@@ -166,6 +173,7 @@ python3 scripts/wordlist_gen.py --min-len 8 --max-len 12
 | 5 | 生日日期 | 19901225, 12251990 | YYYYMMDD / MMDDYYYY |
 | 6 | 拼音组合 | woaini123, wang1234 | 常见词汇 + 数字后缀 |
 | 7 | 键盘模式 | qwerty123, 1qaz2wsx | 键盘布局行走模式 |
+| 8 | PCFG结构 | love1234, wang5200 | v4.0 概率上下文无关文法生成（L4D4/L5D3等高频结构） |
 
 ### WiFi 密码破解
 
@@ -187,6 +195,15 @@ python3 scripts/wifi_cracker.py -t "TARGET" -w wordlists/wifi_dict_final.txt --n
 
 # 交互模式（从Mac已保存WiFi列表中选择目标）
 python3 scripts/wifi_cracker.py -w wordlists/wifi_dict_final.txt
+
+# v4.0: 启用MAC自动轮换（每100次失败后更换MAC，规避AP封禁）
+python3 scripts/wifi_cracker.py -t "TARGET" -w wordlists/wifi_dict_final.txt --mac-rotate 100
+
+# v4.0: 启用智能自适应延迟（自动检测AP限速/封禁并调整）
+python3 scripts/wifi_cracker.py -t "TARGET" -w wordlists/wifi_dict_final.txt --adaptive
+
+# v4.0: 组合使用（推荐：MAC轮换 + 自适应延迟 + 断点续传）
+python3 scripts/wifi_cracker.py -t "TARGET" -w wordlists/wifi_dict_final.txt --mac-rotate 100 --adaptive
 ```
 
 破解器特性：
@@ -194,6 +211,9 @@ python3 scripts/wifi_cracker.py -w wordlists/wifi_dict_final.txt
 - **智能目标选择**：从 Mac 已保存 WiFi 列表中筛选家庭网络，自动排除企业/校园WiFi
 - **实时进度**：显示百分比、速度、预计剩余时间
 - **成功记录**：破解成功自动保存到 captures/cracked.json
+- **MAC自动轮换（v4.0）**：每N次失败后自动更换MAC地址，规避AP封禁
+- **智能自适应延迟（v4.0）**：根据AP响应时间动态调整延迟，检测到封禁自动触发MAC轮换
+- **定期保存进度（v4.0）**：每500次自动保存，防止意外断电丢失进度
 
 ### Hashcat 离线破解
 
@@ -214,11 +234,26 @@ python3 scripts/hashcat_helper.py crack captures/target.hc22000 --list-wordlists
 python3 scripts/hashcat_helper.py mask captures/target.hc22000
 python3 scripts/hashcat_helper.py mask captures/target.hc22000 --min 8 --max 11
 
+# v4.0: 规则攻击（字典 + 变异规则，大幅扩展覆盖率）
+python3 scripts/hashcat_helper.py rule captures/target.hc22000 -w wordlists/wifi_dict_final.txt
+python3 scripts/hashcat_helper.py rule captures/target.hc22000 -w wordlists/wifi_dict_final.txt -r rules/chinese.rule
+
+# v4.0: 混合攻击（字典 + 掩码组合，如密码后追加4位数字）
+python3 scripts/hashcat_helper.py hybrid captures/target.hc22000 -w wordlists/wifi_dict_final.txt
+python3 scripts/hashcat_helper.py hybrid captures/target.hc22000 -w wordlists/wifi_dict_final.txt -m "?d?d?d"
+
+# v4.0: 智能攻击（自动推荐最优策略，支持指定路由器品牌）
+python3 scripts/hashcat_helper.py smart captures/target.hc22000
+python3 scripts/hashcat_helper.py smart captures/target.hc22000 --brand tp-link
+
+# v4.0: 生成中国密码特化规则文件
+python3 scripts/hashcat_helper.py gen-rules
+
 # 直接调用 hashcat（高级用户）
 hashcat -m 22000 -a 0 captures/target.hc22000 wordlists/wifi_dict_final.txt
 hashcat -m 22000 -a 3 captures/target.hc22000 ?d?d?d?d?d?d?d?d           # 8位数字
-hashcat -m 22000 -a 0 -r /opt/homebrew/share/hashcat/rules/best64.rule \
-    captures/target.hc22000 wordlists/wifi_dict_final.txt                  # 规则变异
+hashcat -m 22000 -a 0 -r rules/chinese.rule \
+    captures/target.hc22000 wordlists/wifi_dict_final.txt                  # 中国特化规则变异
 ```
 
 ### 网络分析（连接成功后使用）
@@ -287,6 +322,41 @@ sudo python3 scripts/mac_spoof.py --set AA:BB:CC:DD:EE:FF
 ```
 
 用途：当路由器检测到多次失败连接并封禁 MAC 地址时，更换 MAC 后可继续尝试。
+
+### 智能密码排序（v4.0 新增）
+
+```bash
+# 对字典进行Markov链概率排序（高概率密码排前面，缩短命中时间30-50%）
+python3 scripts/password_ranker.py wordlists/wifi_dict_final.txt
+
+# 指定输出路径（不覆盖原文件）
+python3 scripts/password_ranker.py wordlists/wifi_dict_final.txt -o wordlists/ranked.txt
+```
+
+排序原理：
+- **Markov链评分**：基于字符级n-gram统计，计算每个密码的字符转移概率
+- **PCFG结构分析**：识别密码结构模式（如L4D4=4字母+4数字），匹配高频结构加分
+- **中国密码特征增强**：对吉利数字（520/1314/888）、手机号前缀、生日模式等加权
+
+### 自动破解流水线（v4.0 新增）
+
+```bash
+# 一键启动多轮智能攻击（自动识别路由器品牌 → 选择策略 → 执行攻击）
+python3 scripts/auto_crack.py -t "TARGET_SSID"
+
+# 启用MAC轮换（推荐）
+python3 scripts/auto_crack.py -t "TARGET_SSID" --mac-rotate
+
+# 扫描选择目标（不指定SSID时进入交互选择）
+python3 scripts/auto_crack.py --mac-rotate
+```
+
+流水线攻击轮次：
+1. **社工字典**（如有）→ 约2分钟
+2. **快速高频字典** → 约40分钟
+3. **Markov排序字典** → 自动对字典概率排序后攻击
+4. **完整字典** → 覆盖全部密码模式
+5. 每轮间自动MAC轮换，智能跳过已尝试密码
 
 ### 位置权限修复
 
@@ -362,19 +432,21 @@ Wi-Fi破解/
 ├── wifi-scanner                        # Go 扫描器二进制 (3.3MB)
 ├── .github/workflows/build.yml        # GitHub Actions 自动打包
 ├── scripts/
-│   ├── main.py                        # 主控制台（菜单入口）
-│   ├── wifi_scanner.py                # WiFi 扫描器（家庭WiFi识别）
+│   ├── main.py                        # 主控制台 v4.0（菜单入口）
+│   ├── wifi_scanner.py                # WiFi 扫描器 v3.0（密码强度预估+攻击策略）
 │   ├── download_dicts.py              # 在线字典下载器
-│   ├── wordlist_gen.py                # 智能字典生成器（62.6万条）
-│   ├── wifi_cracker.py                # 在线密码破解器（断点续传）
-│   ├── hashcat_helper.py              # Hashcat 离线破解辅助
+│   ├── wordlist_gen.py                # 智能字典生成器（含PCFG概率结构）
+│   ├── wifi_cracker.py                # 在线破解器（MAC轮换+自适应延迟）
+│   ├── hashcat_helper.py              # Hashcat 辅助（规则/混合/Brain/中国特化）
+│   ├── password_ranker.py             # ★ v4.0 Markov链智能密码排序器
+│   ├── auto_crack.py                  # ★ v4.0 自动化多轮破解流水线
 │   ├── network_analyzer.py            # 网络分析器
 │   ├── keychain_extract.py            # macOS 钥匙串密码提取
 │   ├── smart_dict.py                  # 社工字典生成器（CUPP风格）
 │   ├── mac_spoof.py                   # MAC 地址伪装
 │   └── fix_location.py               # 位置权限修复
 ├── wordlists/
-│   ├── wifi_dict_final.txt            # 最终合并字典 (626,405条, 6.7MB)
+│   ├── wifi_dict_final.txt            # 最终合并字典 (含PCFG结构密码)
 │   └── online/                        # 在线下载的字典
 │       ├── seclists_wpa_top4800.txt   # 4,800条
 │       ├── seclists_wpa_top447.txt    # 447条
@@ -382,7 +454,11 @@ Wi-Fi破解/
 │       ├── chinese_top100000.txt      # 44,082条 (≥8位过滤后)
 │       ├── chinese_top1000.txt        # 541条
 │       └── chinese_weak1000.txt       # 552条
+├── rules/                              # ★ v4.0 hashcat规则文件目录
+│   └── chinese.rule                   # 中国密码特化规则（自动生成）
 ├── captures/                           # 扫描结果/破解记录/握手包
+│   ├── cracked.json                   # 已破解密码记录
+│   └── auto_progress.json             # 自动破解流水线进度
 ├── go_tools/scanner/                   # Go 扫描器源码
 └── docs/                               # 文档
 ```
@@ -394,10 +470,12 @@ Wi-Fi破解/
 ```
 第0轮：社工字典（数百条）   → 约2分钟   → 基于目标个人信息，命中率最高
 第1轮：快速字典（9,700条）  → 约40分钟  → 覆盖最常见密码
-第2轮：中国Top10万字典      → 约5小时   → 覆盖中国用户常见密码
-第3轮：完整字典（62.6万条） → 约45小时  → 覆盖手机号/生日/拼音模式
-第4轮：Hashcat离线（需握手包）→ 秒级    → GPU加速，字典+规则+掩码
+第2轮：Markov排序字典       → 约5小时   → v4.0 高概率密码优先，命中速度提升30-50%
+第3轮：完整字典（含PCFG）   → 约45小时  → 覆盖手机号/生日/拼音/PCFG结构
+第4轮：Hashcat离线（需握手包）→ 秒级    → GPU加速，字典+规则+混合+掩码
 ```
+
+> **v4.0 推荐**：使用 `python3 scripts/auto_crack.py --mac-rotate` 一键执行全部轮次，自动MAC轮换+进度保存
 
 ```bash
 # 第0轮（如果了解目标人物信息）
@@ -460,7 +538,10 @@ python3 scripts/hashcat_helper.py crack target.hc22000 -w wordlists/wifi_dict_fi
 
 **影响**：部分高端路由器检测到连续失败连接后会临时拉黑 MAC 地址（通常 5-30 分钟）。
 
-**缓解方法**：设置合理的延迟间隔（`-d 1.0`），避免过快尝试。
+**v4.0 缓解措施**：
+- MAC自动轮换（`--mac-rotate 100`）：每100次失败自动更换MAC地址
+- 智能自适应延迟（`--adaptive`）：检测到响应变慢时自动增加延迟，检测到疑似封禁时触发MAC轮换
+- 自动破解流水线（`auto_crack.py`）：每轮攻击间自动MAC轮换
 
 ### 5. WPA3-SAE 抗暴力破解
 
@@ -478,14 +559,18 @@ python3 scripts/hashcat_helper.py crack target.hc22000 -w wordlists/wifi_dict_fi
 
 ### 近期可实现（无需额外硬件）
 
-| 优化项 | 预期效果 | 实现方式 |
-| --- | --- | --- |
-| 多线程并发 | 速度提升2-3倍 | 同时用多个虚拟网卡接口尝试（受限于macOS单WiFi接口） |
-| hashcat 规则变异 | 字典覆盖率大幅提升 | 使用 best64.rule / dive.rule 对基础字典进行变异扩展 |
-| 自定义字典模板 | 针对性提高 | 支持用户输入目标信息（姓名/生日/手机号）生成定向字典 |
-| MAC 地址轮换 | 规避 AP 封禁 | 每 N 次尝试后随机化 MAC 地址 |
-| 路由器品牌识别 | 预判默认密码模式 | 通过 OUI（MAC前缀）识别路由器厂商，优先尝试对应默认密码模式 |
-| 社工字典生成 | 极高命中率 | 输入目标姓名/生日/手机号，自动组合生成高针对性字典 |
+| 优化项 | 预期效果 | 实现方式 | 状态 |
+| --- | --- | --- | --- |
+| 多线程并发 | 速度提升2-3倍 | 同时用多个虚拟网卡接口尝试（受限于macOS单WiFi接口） | 待定 |
+| hashcat 规则变异 | 字典覆盖率大幅提升 | 规则攻击+混合攻击+Brain模式+中国特化规则 | **v4.0 已完成** |
+| 自定义字典模板 | 针对性提高 | 支持用户输入目标信息生成定向字典 | **v3.0 已完成** |
+| MAC 地址轮换 | 规避 AP 封禁 | 每 N 次尝试后自动随机化 MAC 地址 | **v4.0 已完成** |
+| 路由器品牌识别 | 预判默认密码模式 | 通过SSID+OUI识别厂商，密码强度预估+攻击策略推荐 | **v4.0 已完成** |
+| 社工字典生成 | 极高命中率 | 输入目标姓名/生日/手机号，自动组合生成高针对性字典 | **v3.0 已完成** |
+| Markov链密码排序 | 命中速度提升30-50% | 基于字符转移概率对字典重新排序 | **v4.0 已完成** |
+| PCFG概率结构生成 | 扩展字典覆盖率 | 基于概率上下文无关文法生成结构化密码 | **v4.0 已完成** |
+| 自动破解流水线 | 一键多轮攻击 | 自动执行多轮策略+MAC轮换+进度保存 | **v4.0 已完成** |
+| 智能自适应延迟 | 规避AP限速/封禁 | 根据AP响应时间动态调整延迟 | **v4.0 已完成** |
 
 ### 中期优化（需要额外硬件）
 

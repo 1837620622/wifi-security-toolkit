@@ -316,36 +316,152 @@ class DictGenerator:
         return self.stats["keyboard"]
 
     # --------------------------------------------------------
+    # 模块8：PCFG 概率结构生成
+    # 基于中国密码结构统计的概率上下文无关文法生成器
+    # 学术参考：
+    #   - Weir et al. (2009): PCFG密码猜测
+    #   - A Systematic Review on Password Guessing Tasks (Yu et al., 2023)
+    #   - GENPass (Xia et al., 2019): 多源深度学习密码猜测
+    # --------------------------------------------------------
+    def gen_pcfg(self):
+        """
+        PCFG 概率结构生成器
+        根据中国密码结构统计概率分布生成密码候选
+        
+        核心结构模式（按频率排序）：
+          D8  = 8位纯数字（约35%的中国WiFi密码）
+          D11 = 11位纯数字/手机号（约15%）
+          L4D4 = 4字母+4数字（约8%）
+          L5D3 = 5字母+3数字（约5%）
+          D6L2 = 6数字+2字母（约3%）
+          L8  = 8位纯字母（约3%）
+          L3D5 = 3字母+5数字（约3%）
+        """
+        before = len(self.passwords)
+
+        # ---- 高频数字填充值 ----
+        freq_d4 = [
+            "1234", "5678", "0000", "1111", "2222", "6666", "8888", "9999",
+            "1314", "5200", "5201", "1688", "5211", "7758", "2580", "1990",
+            "1995", "2000", "2008", "2010", "2020", "2024", "2025",
+        ]
+        freq_d3 = [
+            "123", "520", "521", "666", "888", "999", "168", "188",
+            "000", "111", "222", "333", "456", "789", "007", "100",
+        ]
+        freq_d5 = [
+            "12345", "52013", "13140", "00000", "11111", "66666", "88888",
+            "99999", "52001", "16888", "18888", "56789", "10086", "10000",
+        ]
+
+        # ---- 高频字母填充值 ----
+        freq_l3 = [
+            "abc", "asd", "qwe", "zxc", "www", "qqq", "aaa",
+            "wan", "liu", "sun", "zhu", "lin",
+        ]
+        freq_l4 = [
+            "love", "wang", "zhang", "chen", "yang", "zhao", "admin",
+            "wifi", "mima", "baby", "life", "cool", "good", "qwer",
+            "asdf", "zxcv", "pass", "user", "test", "home", "aaaa",
+        ]
+        freq_l5 = [
+            "woain", "happy", "lucky", "hello", "angel", "admin",
+            "nihao", "super", "sweet", "zhang", "china",
+        ]
+        freq_l6_8 = [
+            "woaini", "iloveu", "forever", "password", "qwerty",
+            "jiayou", "woainia", "iloveyou", "zhongguo",
+        ]
+
+        # ---- 结构1: L4D4（4字母+4数字，约8%） ----
+        for alpha in freq_l4:
+            for digit in freq_d4:
+                pwd = alpha + digit
+                self._add(pwd)
+                # 首字母大写变体
+                self._add(alpha.capitalize() + digit)
+
+        # ---- 结构2: L5D3（5字母+3数字，约5%） ----
+        for alpha in freq_l5:
+            for digit in freq_d3:
+                self._add(alpha + digit)
+                self._add(alpha.capitalize() + digit)
+
+        # ---- 结构3: L3D5（3字母+5数字，约3%） ----
+        for alpha in freq_l3:
+            for digit in freq_d5:
+                self._add(alpha + digit)
+
+        # ---- 结构4: D4L4（4数字+4字母） ----
+        for digit in freq_d4:
+            for alpha in freq_l4[:10]:
+                self._add(digit + alpha)
+
+        # ---- 结构5: D3L5（3数字+5字母） ----
+        for digit in freq_d3:
+            for alpha in freq_l5:
+                self._add(digit + alpha)
+
+        # ---- 结构6: L6-8纯字母 + 数字后缀组合 ----
+        simple_suffixes = ["1", "12", "01", "11", "88", "66"]
+        for alpha in freq_l6_8:
+            self._add(alpha)
+            for suf in simple_suffixes:
+                self._add(alpha + suf)
+
+        # ---- 结构7: L4D4S1（字母+数字+特殊字符） ----
+        special_chars = ["!", "@", "#", ".", "_"]
+        for alpha in freq_l4[:8]:
+            for digit in freq_d4[:8]:
+                for sp in special_chars:
+                    self._add(alpha + digit + sp)
+                    self._add(alpha + sp + digit)
+
+        # ---- 结构8: D4L2D2（数字+短字母+数字混合） ----
+        short_alpha = ["ab", "cd", "aa", "qq", "ww", "zz"]
+        for d4 in freq_d4[:10]:
+            for la in short_alpha:
+                for d2 in ["00", "11", "22", "88", "99", "12"]:
+                    self._add(d4 + la + d2)
+
+        self.stats["pcfg"] = len(self.passwords) - before
+        return self.stats["pcfg"]
+
+    # --------------------------------------------------------
     # 全量生成
     # --------------------------------------------------------
     def generate_all(self, phone_prefixes=None, year_start=1960, year_end=2010):
         """按优先级顺序生成全部密码"""
-        print("[1/7] 加载核心高频密码...")
+        print("[1/8] 加载核心高频密码...")
         n = self.gen_core_top()
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
-        print("[2/7] 加载在线开源字典...")
+        print("[2/8] 加载在线开源字典...")
         n = self.load_online_dicts()
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
-        print("[3/7] 生成纯数字密码...")
+        print("[3/8] 生成纯数字密码...")
         n = self.gen_numeric()
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
-        print("[4/7] 生成手机号码密码...")
+        print("[4/8] 生成手机号码密码...")
         n = self.gen_phone(phone_prefixes)
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
-        print("[5/7] 生成生日日期密码...")
+        print("[5/8] 生成生日日期密码...")
         n = self.gen_birthday(year_start, year_end)
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
-        print("[6/7] 生成拼音组合密码...")
+        print("[6/8] 生成拼音组合密码...")
         n = self.gen_pinyin()
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
-        print("[7/7] 生成键盘模式密码...")
+        print("[7/8] 生成键盘模式密码...")
         n = self.gen_keyboard()
+        print(f"      +{n} 条，累计: {len(self.passwords)}")
+
+        print("[8/8] PCFG概率结构生成...")
+        n = self.gen_pcfg()
         print(f"      +{n} 条，累计: {len(self.passwords)}")
 
     # --------------------------------------------------------
