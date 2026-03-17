@@ -194,28 +194,89 @@ void disconnect_wifi() {
 }
 
 // ============================================================
-// 连接到指定WiFi（用密码尝试）
+// 目标网络缓存（避免每次connect都重新扫描）
+// ============================================================
+static NSMutableDictionary *_cachedNetworks = nil;
+
+// ============================================================
+// 缓存指定SSID的CWNetwork对象
 // 返回: 0=成功, -1=失败
 // ============================================================
-int connect_wifi(const char *ssid, const char *password) {
+int cache_target_network(const char *ssid) {
     @autoreleasepool {
+        if (!_cachedNetworks) {
+            _cachedNetworks = [[NSMutableDictionary alloc] init];
+        }
         CWInterface *iface = [[CWWiFiClient sharedWiFiClient] interface];
         if (!iface) return -1;
 
+        NSString *ssidStr = [NSString stringWithUTF8String:ssid];
         NSError *error = nil;
-        NSSet<CWNetwork *> *networks = [iface scanForNetworksWithName:
-            [NSString stringWithUTF8String:ssid] error:&error];
+        NSSet<CWNetwork *> *networks = [iface scanForNetworksWithName:ssidStr error:&error];
         if (error || !networks || [networks count] == 0) {
             return -1;
         }
 
-        CWNetwork *target = [networks anyObject];
-        error = nil;
+        // 选择信号最强的
+        CWNetwork *best = nil;
+        for (CWNetwork *n in networks) {
+            if (!best || [n rssiValue] > [best rssiValue]) {
+                best = n;
+            }
+        }
+        if (best) {
+            [_cachedNetworks setObject:best forKey:ssidStr];
+        }
+        return best ? 0 : -1;
+    }
+}
+
+// ============================================================
+// 快速连接（使用缓存的CWNetwork，无需重新扫描）
+// 返回: 0=成功, -1=失败, -2=缓存未命中（需先cache）
+// ============================================================
+int connect_wifi_fast(const char *ssid, const char *password) {
+    @autoreleasepool {
+        CWInterface *iface = [[CWWiFiClient sharedWiFiClient] interface];
+        if (!iface) return -1;
+
+        NSString *ssidStr = [NSString stringWithUTF8String:ssid];
+        CWNetwork *target = nil;
+
+        // 先从缓存取
+        if (_cachedNetworks) {
+            target = [_cachedNetworks objectForKey:ssidStr];
+        }
+
+        // 缓存未命中，回退到扫描
+        if (!target) {
+            NSError *scanErr = nil;
+            NSSet<CWNetwork *> *networks = [iface scanForNetworksWithName:ssidStr error:&scanErr];
+            if (scanErr || !networks || [networks count] == 0) {
+                return -1;
+            }
+            target = [networks anyObject];
+            // 缓存起来
+            if (!_cachedNetworks) {
+                _cachedNetworks = [[NSMutableDictionary alloc] init];
+            }
+            [_cachedNetworks setObject:target forKey:ssidStr];
+        }
+
+        NSError *error = nil;
         BOOL ok = [iface associateToNetwork:target
                    password:[NSString stringWithUTF8String:password]
                    error:&error];
         return ok ? 0 : -1;
     }
+}
+
+// ============================================================
+// 连接到指定WiFi（兼容旧接口，内部调用快速版）
+// 返回: 0=成功, -1=失败
+// ============================================================
+int connect_wifi(const char *ssid, const char *password) {
+    return connect_wifi_fast(ssid, password);
 }
 */
 import "C"
@@ -432,6 +493,15 @@ func CurrentSSID() string {
 }
 
 // ============================================================
+// CacheTarget 预缓存目标网络（爆破前调用一次，后续连接跳过扫描）
+// ============================================================
+func CacheTarget(ssid string) bool {
+	cs := C.CString(ssid)
+	defer C.free(unsafe.Pointer(cs))
+	return C.cache_target_network(cs) == 0
+}
+
+// ============================================================
 // TryConnect 尝试用密码连接WiFi
 // 返回: true=连接成功
 // ============================================================
@@ -448,6 +518,20 @@ func TryConnect(ssid, password string) bool {
 // ============================================================
 func DisconnectWiFi() {
 	C.disconnect_wifi()
+}
+
+// ============================================================
+// ReconnectWiFi 重连指定WiFi（通过networksetup命令）
+// 不需要密码，利用系统已保存的凭证
+// ============================================================
+func ReconnectWiFi(ssid string) bool {
+	if ssid == "" {
+		return false
+	}
+	// 使用networksetup命令重连（利用系统keychain中保存的密码）
+	cmd := exec.Command("networksetup", "-setairportnetwork", "en0", ssid)
+	err := cmd.Run()
+	return err == nil
 }
 
 // ============================================================

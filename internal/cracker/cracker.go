@@ -33,7 +33,7 @@ type CrackConfig struct {
 // ============================================================
 func DefaultConfig() CrackConfig {
 	return CrackConfig{
-		Delay:    500 * time.Millisecond,
+		Delay:    200 * time.Millisecond,
 		Verbose:  true,
 		MaxRetry: 1,
 	}
@@ -100,9 +100,20 @@ func CrackAll(targets []scanner.WiFiNetwork, passwords []string, cfg CrackConfig
 	results := make([]CrackResult, 0, len(targets))
 
 	fmt.Printf("\n  ╔══════════════════════════════════════════╗\n")
-	fmt.Printf("  ║   WiFi 爆破引擎 v1.0 (Go)               ║\n")
+	fmt.Printf("  ║   WiFi 爆破引擎 v2.0 (Go + 缓存加速)    ║\n")
 	fmt.Printf("  ║   目标: %d 个 | 字典: %d 条              ║\n", len(targets), len(passwords))
 	fmt.Printf("  ╚══════════════════════════════════════════╝\n\n")
+
+	// 预缓存所有目标网络（一次扫描，后续直接连接，大幅提升速度）
+	fmt.Println("  [*] 预缓存目标网络...")
+	for _, net := range targets {
+		if scanner.CacheTarget(net.SSID) {
+			fmt.Printf("    ✓ %s 已缓存\n", net.SSID)
+		} else {
+			fmt.Printf("    ✗ %s 缓存失败（爆破时自动重试）\n", net.SSID)
+		}
+	}
+	fmt.Println()
 
 	successCount := 0
 	for i, net := range targets {
