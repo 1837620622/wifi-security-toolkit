@@ -126,6 +126,127 @@ def get_sec_name(code):
 
 
 # ============================================================
+# 位置权限自动请求（macOS 13+ 必须）
+# 核心方式：sudo + Touch ID 直接修改 locationd 授权配置
+# ============================================================
+_location_authorized = False  # 缓存权限状态，避免重复请求
+
+
+def ensure_location_permission():
+    """
+    确保已获得位置服务权限（CoreWLAN获取SSID/BSSID必须）
+    macOS 13+ 将WiFi网络标识视为位置数据，未授权时返回None
+    修复方式：通过 sudo + Touch ID 直接修改 locationd 授权
+    """
+    global _location_authorized
+    if _location_authorized:
+        return True
+
+    try:
+        import CoreLocation
+    except ImportError:
+        print("[!] 缺少CoreLocation: pip3 install pyobjc-framework-CoreLocation")
+        return False
+
+    manager = CoreLocation.CLLocationManager.alloc().init()
+    status = manager.authorizationStatus()
+    enabled = CoreLocation.CLLocationManager.locationServicesEnabled()
+
+    # 位置服务总开关未开启
+    if not enabled:
+        print("[!] macOS位置服务未开启")
+        print("    请前往: 系统设置 -> 隐私与安全 -> 位置服务 -> 开启")
+        return False
+
+    # 已授权（状态3=始终, 4=使用时）
+    if status in (3, 4):
+        _location_authorized = True
+        return True
+
+    # 未授权（状态0=未确定, 2=拒绝），使用 sudo 直接修复
+    print("[!] 位置权限未授权，正在通过 sudo 修复...")
+    print("[*] 请用 Touch ID 或输入密码确认")
+    print()
+    if _fix_locationd_via_sudo():
+        _location_authorized = True
+        return True
+
+    # sudo 失败，提示手动修复
+    print("[!] 自动修复失败，请运行: python3 scripts/fix_location.py")
+    return False
+
+
+def _fix_locationd_via_sudo():
+    """通过 sudo 直接修改 locationd 的 clients.plist 授权 Python"""
+    import os
+    import re as _re
+
+    python_exe = sys.executable
+    targets = [python_exe]
+    # 同时授权带版本号和不带版本号的 Python
+    base = os.path.dirname(python_exe)
+    name = os.path.basename(python_exe)
+    if not _re.search(r'\d', name):
+        for f in os.listdir(base):
+            if f.startswith('python3.') and os.path.isfile(os.path.join(base, f)):
+                targets.append(os.path.join(base, f))
+    elif _re.search(r'python3\.\d+', name):
+        generic = os.path.join(base, 'python3')
+        if os.path.isfile(generic):
+            targets.append(generic)
+    targets = list(set(targets))
+
+    fix_script = f'''
+import plistlib, uuid, subprocess, os
+plist_path = "/var/db/locationd/clients.plist"
+with open(plist_path, "rb") as f:
+    d = plistlib.load(f)
+targets = {targets!r}
+changed = False
+for exe in targets:
+    if not os.path.isfile(exe):
+        continue
+    found = False
+    for k, v in d.items():
+        if isinstance(v, dict) and v.get("Executable") == exe:
+            if not v.get("Authorized"):
+                v["Authorized"] = True
+                v["Registered"] = True
+                changed = True
+            found = True
+            break
+    if not found:
+        key = uuid.uuid4().hex[:8].upper() + ":e" + exe + ":"
+        d[key] = {{"Authorized": True, "Executable": exe, "Registered": True}}
+        changed = True
+if changed:
+    with open(plist_path, "wb") as f:
+        plistlib.dump(d, f, fmt=plistlib.FMT_BINARY)
+    subprocess.run(["killall", "locationd"], capture_output=True)
+    print("FIXED")
+else:
+    print("ALREADY_OK")
+'''
+
+    try:
+        r = subprocess.run(
+            ["sudo", sys.executable, "-c", fix_script],
+            capture_output=True, text=True, timeout=60
+        )
+        if r.returncode == 0 and ("FIXED" in r.stdout or "ALREADY_OK" in r.stdout):
+            if "FIXED" in r.stdout:
+                print("[+] 位置权限已通过 sudo 授权成功！")
+                time.sleep(1)  # 等待 locationd 重启
+            else:
+                print("[+] 位置权限已就绪")
+            return True
+        else:
+            return False
+    except Exception:
+        return False
+
+
+# ============================================================
 # CoreWLAN 扫描
 # ============================================================
 def scan_corewlan():
@@ -135,6 +256,9 @@ def scan_corewlan():
     except ImportError:
         print("[!] pip3 install pyobjc-framework-CoreWLAN")
         return [], None
+
+    # 扫描前自动请求位置权限
+    ensure_location_permission()
 
     client = CoreWLAN.CWWiFiClient.sharedWiFiClient()
     iface = client.interface()
