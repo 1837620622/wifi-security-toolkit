@@ -23,6 +23,7 @@
 | Hashcat 辅助 | hashcat_helper.py | hashcat 离线破解 + **规则攻击/混合攻击/Brain模式/中国特化规则** | Python |
 | **智能排序器** | password_ranker.py | **Markov链 + PCFG + 中国密码特征的智能密码概率排序（v4.0新增）** | Python |
 | **自动破解流水线** | auto_crack.py | **多轮智能攻击：品牌识别→策略选择→MAC轮换→自动攻击（v4.0新增）** | Python |
+| **批量破解器** | batch_crack.py | **自动扫描全部家庭WiFi→逐个攻击→密码统一保存（v4.0新增）** | Python |
 | 网络分析器 | network_analyzer.py | 网关探测/局域网设备扫描/测速/路由器识别 | Python |
 | 钥匙串提取 | keychain_extract.py | 从 macOS 钥匙串提取已保存 WiFi 名称和密码 | Python |
 | 社工字典 | smart_dict.py | 根据目标个人信息（姓名/生日/手机号）生成定向字典 | Python |
@@ -358,6 +359,39 @@ python3 scripts/auto_crack.py --mac-rotate
 4. **完整字典** → 覆盖全部密码模式
 5. 每轮间自动MAC轮换，智能跳过已尝试密码
 
+### 批量WiFi破解（v4.0 新增）
+
+```bash
+# 自动扫描周围所有家庭WiFi → 按难度+信号排序 → 逐个快速攻击
+python3 scripts/batch_crack.py
+
+# 中等深度（含SecLists约5万条）
+python3 scripts/batch_crack.py --depth medium
+
+# 完整深度（含全部字典）
+python3 scripts/batch_crack.py --depth full
+
+# 手动指定多个目标SSID
+python3 scripts/batch_crack.py --targets "WiFi_A" "WiFi_B" "WiFi_C"
+
+# 每个字典限制最多5000条（快速扫一遍所有WiFi）
+python3 scripts/batch_crack.py --max-per-dict 5000
+
+# 查看所有已破解的WiFi密码
+python3 scripts/batch_crack.py --show-cracked
+
+# 清除进度重新开始
+python3 scripts/batch_crack.py --reset
+```
+
+批量破解特性：
+- **自动扫描**：自动识别周围所有家庭WiFi，跳过企业/开放网络
+- **智能排序**：按密码难度（低→高）+ 信号强度排序，优先攻击弱密码WiFi
+- **断点续传**：已破解/已耗尽的目标自动跳过
+- **统一保存**：所有破解成功的密码保存到 `captures/cracked.json`
+
+> **注意**：macOS 仅有一个WiFi网卡，硬件层面无法同时连接多个AP，因此采用"批量串行"策略
+
 ### 位置权限修复
 
 ```bash
@@ -440,6 +474,7 @@ Wi-Fi破解/
 │   ├── hashcat_helper.py              # Hashcat 辅助（规则/混合/Brain/中国特化）
 │   ├── password_ranker.py             # ★ v4.0 Markov链智能密码排序器
 │   ├── auto_crack.py                  # ★ v4.0 自动化多轮破解流水线
+│   ├── batch_crack.py                 # ★ v4.0 批量WiFi串行破解器
 │   ├── network_analyzer.py            # 网络分析器
 │   ├── keychain_extract.py            # macOS 钥匙串密码提取
 │   ├── smart_dict.py                  # 社工字典生成器（CUPP风格）
@@ -458,7 +493,8 @@ Wi-Fi破解/
 │   └── chinese.rule                   # 中国密码特化规则（自动生成）
 ├── captures/                           # 扫描结果/破解记录/握手包
 │   ├── cracked.json                   # 已破解密码记录
-│   └── auto_progress.json             # 自动破解流水线进度
+│   ├── auto_progress.json             # 自动破解流水线进度
+│   └── batch_progress.json            # 批量破解进度记录
 ├── go_tools/scanner/                   # Go 扫描器源码
 └── docs/                               # 文档
 ```

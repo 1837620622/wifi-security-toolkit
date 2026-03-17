@@ -46,6 +46,7 @@ def banner():
   [D] 密码强度扫描（品牌识别+攻击策略）
   [E] 智能密码排序（Markov链概率排序）
   [F] 自动破解流水线（一键多轮智能攻击）
+  [G] 批量WiFi破解（扫描全部→逐个攻击→密码保存）
 
   ─── 辅助工具 ───
   [6] 网络分析（连接后使用）
@@ -325,6 +326,33 @@ def menu_mac_spoof():
         run_script("mac_spoof.py")
 
 
+def menu_batch_crack():
+    """批量WiFi破解"""
+    print(f"{CYAN}[批量WiFi破解 v1.0]{RESET}")
+    print("  [1] 自动扫描 + 快速批量破解（高频字典约1万条）")
+    print("  [2] 自动扫描 + 中等深度破解（约5万条）")
+    print("  [3] 自动扫描 + 完整深度破解（含全部字典）")
+    print("  [4] 手动指定目标SSID批量破解")
+    print("  [5] 查看已破解的WiFi")
+    print("  [6] 清除批量进度记录")
+    print()
+    c = input("  选择 (1-6): ").strip()
+    if c == "1":
+        run_script("batch_crack.py", ["--depth", "quick"])
+    elif c == "2":
+        run_script("batch_crack.py", ["--depth", "medium"])
+    elif c == "3":
+        run_script("batch_crack.py", ["--depth", "full"])
+    elif c == "4":
+        ssids = input("  输入目标SSID（空格分隔多个）: ").strip().split()
+        if ssids:
+            run_script("batch_crack.py", ["--targets"] + ssids + ["--depth", "quick"])
+    elif c == "5":
+        run_script("batch_crack.py", ["--show-cracked"])
+    elif c == "6":
+        run_script("batch_crack.py", ["--reset"])
+
+
 def main():
     handlers = {
         "1": menu_scan,
@@ -343,6 +371,7 @@ def main():
         "d": menu_strength_scan,
         "e": menu_password_ranker,
         "f": menu_auto_crack,
+        "g": menu_batch_crack,
     }
 
     while True:
