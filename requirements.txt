@@ -1,0 +1,4 @@
+pyobjc-framework-CoreWLAN>=10.0
+scapy>=2.5.0
+pywifi>=1.1.12
+rich>=13.0
