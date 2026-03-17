@@ -326,17 +326,18 @@ python3 scripts/password_ranker.py wordlists/wifi_dict_final.txt -o wordlists/ra
 ### 自动破解流水线（v4.0 新增）
 
 ```bash
-# 一键启动多轮智能攻击（自动识别路由器品牌 → 选择策略 → 执行攻击）
+# 一键启动多轮智能攻击（万能钥匙预查 → 品牌识别 → 策略选择 → 执行攻击）
 python3 scripts/auto_crack.py -t "TARGET_SSID"
 
-# 启用MAC轮换（推荐）
-python3 scripts/auto_crack.py -t "TARGET_SSID" --mac-rotate
+# 指定BSSID启用万能钥匙预查（推荐）
+python3 scripts/auto_crack.py -t "TARGET_SSID" --bssid "AA:BB:CC:DD:EE:FF" --mac-rotate
 
 # 扫描选择目标（不指定SSID时进入交互选择）
 python3 scripts/auto_crack.py --mac-rotate
 ```
 
 流水线攻击轮次：
+0. **万能钥匙预查**（秒级）→ 查询共享密码库，命中则跳过爆破
 1. **社工字典**（如有）→ 约2分钟
 2. **快速高频字典** → 约40分钟
 3. **Markov排序字典** → 自动对字典概率排序后攻击
@@ -369,6 +370,7 @@ python3 scripts/batch_crack.py --reset
 ```
 
 批量破解特性：
+- **万能钥匙预查**：爆破前自动查询共享密码库，命中则跳过爆破
 - **自动扫描**：自动识别周围所有家庭WiFi，跳过企业/开放网络
 - **智能排序**：按密码难度（低→高）+ 信号强度排序，优先攻击弱密码WiFi
 - **断点续传**：已破解/已耗尽的目标自动跳过
@@ -391,7 +393,8 @@ python3 scripts/lightning_crack.py --targets "CMCC-532" "TP-LINK_FB0E"
 python3 scripts/lightning_crack.py --show-default-pwds "TP-LINK_FB0E"
 ```
 
-闪电破解两大模式：
+闪电破解三大模式：
+- **万能钥匙预查**：爆破前秒级查询共享密码库，命中则直接获取密码
 - **默认密码计算器**：根据SSID品牌特征算出路由器默认密码（TP-Link/CMCC/Tenda/FAST/MERCURY等）
 - **零延迟扫射**：每个目标仅试5-20条最可能的密码，无等待间隔
 

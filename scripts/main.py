@@ -125,12 +125,15 @@ def menu_password_ranker():
 def menu_auto_crack():
     """v4.0: 自动破解流水线"""
     print(f"{CYAN}[自动破解流水线]{RESET}")
-    print("  多轮智能攻击: 路由器识别 -> 策略选择 -> MAC轮换 -> 自动攻击")
+    print("  多轮智能攻击: 万能钥匙预查 -> 路由器识别 -> 策略选择 -> MAC轮换 -> 自动攻击")
     print()
     ssid = input("  目标SSID (回车扫描选择): ").strip()
     args = []
     if ssid:
         args.extend(["-t", ssid])
+        bssid = input("  目标BSSID/MAC地址 (可选，用于万能钥匙查询): ").strip()
+        if bssid:
+            args.extend(["--bssid", bssid])
     mac = input("  启用MAC轮换? (Y/n): ").strip().lower()
     if mac != "n":
         args.append("--mac-rotate")
