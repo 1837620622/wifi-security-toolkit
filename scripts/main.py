@@ -47,16 +47,15 @@ def banner():
   [E] 智能密码排序（Markov链概率排序）
   [F] 自动破解流水线（一键多轮智能攻击）
   [G] 批量WiFi破解（扫描全部→逐个攻击→密码保存）
-  [H] 闪电破解（钥匙串提取+默认密码计算+零延迟扫射）
+  [H] 闪电破解（默认密码计算+零延迟扫射）
 
   ─── 辅助工具 ───
   [6] 网络分析（连接后使用）
   [7] 查看已破解的WiFi
   [8] 修复位置权限（获取SSID名称）
   [9] 环境检查
-  [A] 钥匙串WiFi密码提取
-  [B] 社工字典生成（目标定向）
-  [C] MAC地址伪装（规避封禁）
+  [A] 社工字典生成（目标定向）
+  [B] MAC地址伪装（规避封禁）
   [0] 退出{RESET}
 """)
 
@@ -298,14 +297,6 @@ def menu_check():
     print(f"  字典: {len(wl_files)} 个, {total_lines:,} 条密码")
 
 
-def menu_keychain():
-    # 钥匙串 WiFi 密码提取，可选导出全部账号信息
-    print(f"{CYAN}[钥匙串提取]{RESET}")
-    mode = input("  提取密码? (y/N): ").strip().lower()
-    args = ["-e", "-a"] if mode == "y" else []
-    run_script("keychain_extract.py", args)
-
-
 def menu_smart_dict():
     # 启动社工定向字典生成
     print(f"{CYAN}[社工字典]{RESET}")
@@ -330,26 +321,23 @@ def menu_mac_spoof():
 def menu_lightning_crack():
     """闪电WiFi破解"""
     print(f"{CYAN}[闪电WiFi破解 v1.0]{RESET}")
-    print("  [1] 全自动闪电破解（钥匙串+默认密码+零延迟）")
-    print("  [2] 仅钥匙串提取（秒级获取已保存密码）")
-    print("  [3] 查看指定SSID的默认密码列表")
-    print("  [4] 手动指定目标闪电破解")
-    print("  [5] 查看已破解的WiFi")
+    print("  [1] 全自动闪电破解（默认密码计算+零延迟扫射）")
+    print("  [2] 查看指定SSID的默认密码列表")
+    print("  [3] 手动指定目标闪电破解")
+    print("  [4] 查看已破解的WiFi")
     print()
-    c = input("  选择 (1-5): ").strip()
+    c = input("  选择 (1-4): ").strip()
     if c == "1":
         run_script("lightning_crack.py")
     elif c == "2":
-        run_script("keychain_extract.py", ["-e", "-a"])
-    elif c == "3":
         ssid = input("  输入SSID: ").strip()
         if ssid:
             run_script("lightning_crack.py", ["--show-default-pwds", ssid])
-    elif c == "4":
+    elif c == "3":
         ssids = input("  输入目标SSID（空格分隔多个）: ").strip().split()
         if ssids:
             run_script("lightning_crack.py", ["--targets"] + ssids)
-    elif c == "5":
+    elif c == "4":
         run_script("lightning_crack.py", ["--show-cracked"])
 
 
@@ -391,9 +379,8 @@ def main():
         "7": menu_cracked,
         "8": menu_fix_location,
         "9": menu_check,
-        "a": menu_keychain,
-        "b": menu_smart_dict,
-        "c": menu_mac_spoof,
+        "a": menu_smart_dict,
+        "b": menu_mac_spoof,
         # v4.0 新增功能
         "d": menu_strength_scan,
         "e": menu_password_ranker,

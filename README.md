@@ -24,9 +24,8 @@
 | **智能排序器** | password_ranker.py | **Markov链 + PCFG + 中国密码特征的智能密码概率排序（v4.0新增）** | Python |
 | **自动破解流水线** | auto_crack.py | **多轮智能攻击：品牌识别→策略选择→MAC轮换→自动攻击（v4.0新增）** | Python |
 | **批量破解器** | batch_crack.py | **自动扫描全部家庭WiFi→逐个攻击→密码统一保存（v4.0新增）** | Python |
-| **闪电破解器** | lightning_crack.py | **钥匙串提取+默认密码计算器+零延迟扫射，每目标5-10秒（v4.0新增）** | Python |
+| **闪电破解器** | lightning_crack.py | **默认密码计算器+零延迟扫射，每目标5-10秒（v4.0新增）** | Python |
 | 网络分析器 | network_analyzer.py | 网关探测/局域网设备扫描/测速/路由器识别 | Python |
-| 钥匙串提取 | keychain_extract.py | 从 macOS 钥匙串提取已保存 WiFi 名称和密码 | Python |
 | 社工字典 | smart_dict.py | 根据目标个人信息（姓名/生日/手机号）生成定向字典 | Python |
 | MAC 伪装 | mac_spoof.py | 随机化/恢复 MAC 地址，规避 AP 封禁 | Python |
 | 位置权限修复 | fix_location.py | 解决 macOS 13+ SSID 被隐藏的权限问题 | Python |
@@ -271,23 +270,6 @@ python3 scripts/network_analyzer.py --speed-only
 python3 scripts/network_analyzer.py --devices-only
 ```
 
-### 钥匙串 WiFi 密码提取（macOS 独有）
-
-```bash
-# 列出 Mac 上所有已保存的 WiFi 名称（自动分类家庭/企业）
-python3 scripts/keychain_extract.py
-
-# 提取已保存 WiFi 的密码（系统会弹出授权对话框）
-python3 scripts/keychain_extract.py -e
-
-# 提取指定 SSID 的密码
-python3 scripts/keychain_extract.py -e -s "目标WiFi名"
-
-# 提取并分析密码模式（纯数字比例/长度分布）
-python3 scripts/keychain_extract.py -e -a
-```
-
-用途：提取已知密码 → 分析密码模式 → 反向优化字典生成策略
 
 ### 社工字典生成（目标定向破解）
 
@@ -398,21 +380,17 @@ python3 scripts/batch_crack.py --reset
 不走字典爆破，用最聪明的方式秒级获取密码。每个目标仅5-10秒，比字典爆破快10倍以上。
 
 ```bash
-# 全自动闪电破解（钥匙串提取 + 默认密码计算 + 零延迟扫射）
+# 全自动闪电破解（默认密码计算 + 零延迟扫射）
 python3 scripts/lightning_crack.py
 
 # 手动指定目标
 python3 scripts/lightning_crack.py --targets "CMCC-532" "TP-LINK_FB0E"
 
-# 跳过钥匙串（仅用默认密码计算）
-python3 scripts/lightning_crack.py --skip-keychain
-
 # 查看指定SSID的默认密码候选列表
 python3 scripts/lightning_crack.py --show-default-pwds "TP-LINK_FB0E"
 ```
 
-闪电破解三大模式：
-- **钥匙串提取**：直接从macOS钥匙串读取已保存密码，秒级完成
+闪电破解两大模式：
 - **默认密码计算器**：根据SSID品牌特征算出路由器默认密码（TP-Link/CMCC/Tenda/FAST/MERCURY等）
 - **零延迟扫射**：每个目标仅试5-20条最可能的密码，无等待间隔
 
@@ -499,9 +477,8 @@ Wi-Fi破解/
 │   ├── password_ranker.py             # ★ v4.0 Markov链智能密码排序器
 │   ├── auto_crack.py                  # ★ v4.0 自动化多轮破解流水线
 │   ├── batch_crack.py                 # ★ v4.0 批量WiFi串行破解器
-│   ├── lightning_crack.py             # ★ v4.0 闪电破解器（钥匙串+默认密码+零延迟）
+│   ├── lightning_crack.py             # ★ v4.0 闪电破解器（默认密码+零延迟）
 │   ├── network_analyzer.py            # 网络分析器
-│   ├── keychain_extract.py            # macOS 钥匙串密码提取
 │   ├── smart_dict.py                  # 社工字典生成器（CUPP风格）
 │   ├── mac_spoof.py                   # MAC 地址伪装
 │   └── fix_location.py               # 位置权限修复
