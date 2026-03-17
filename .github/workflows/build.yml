@@ -20,6 +20,9 @@ jobs:
         run: |
           pip install pyinstaller
           pip install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation scapy
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
       - name: Build macOS binary
         run: pyinstaller --onefile --name wifi-toolkit-macos --add-data "scripts:scripts" --add-data "wordlists/online:wordlists/online" --hidden-import CoreWLAN --hidden-import CoreLocation scripts/main.py
       - name: Build Go scanner
