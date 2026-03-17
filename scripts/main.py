@@ -47,6 +47,7 @@ def banner():
   [E] 智能密码排序（Markov链概率排序）
   [F] 自动破解流水线（一键多轮智能攻击）
   [G] 批量WiFi破解（扫描全部→逐个攻击→密码保存）
+  [H] 闪电破解（钥匙串提取+默认密码计算+零延迟扫射）
 
   ─── 辅助工具 ───
   [6] 网络分析（连接后使用）
@@ -326,6 +327,32 @@ def menu_mac_spoof():
         run_script("mac_spoof.py")
 
 
+def menu_lightning_crack():
+    """闪电WiFi破解"""
+    print(f"{CYAN}[闪电WiFi破解 v1.0]{RESET}")
+    print("  [1] 全自动闪电破解（钥匙串+默认密码+零延迟）")
+    print("  [2] 仅钥匙串提取（秒级获取已保存密码）")
+    print("  [3] 查看指定SSID的默认密码列表")
+    print("  [4] 手动指定目标闪电破解")
+    print("  [5] 查看已破解的WiFi")
+    print()
+    c = input("  选择 (1-5): ").strip()
+    if c == "1":
+        run_script("lightning_crack.py")
+    elif c == "2":
+        run_script("keychain_extract.py", ["-e", "-a"])
+    elif c == "3":
+        ssid = input("  输入SSID: ").strip()
+        if ssid:
+            run_script("lightning_crack.py", ["--show-default-pwds", ssid])
+    elif c == "4":
+        ssids = input("  输入目标SSID（空格分隔多个）: ").strip().split()
+        if ssids:
+            run_script("lightning_crack.py", ["--targets"] + ssids)
+    elif c == "5":
+        run_script("lightning_crack.py", ["--show-cracked"])
+
+
 def menu_batch_crack():
     """批量WiFi破解"""
     print(f"{CYAN}[批量WiFi破解 v1.0]{RESET}")
@@ -372,6 +399,7 @@ def main():
         "e": menu_password_ranker,
         "f": menu_auto_crack,
         "g": menu_batch_crack,
+        "h": menu_lightning_crack,
     }
 
     while True:
