@@ -89,63 +89,138 @@ def save_batch_progress(progress):
 
 
 # ============================================================
-# WiFi扫描（直接调用wifi_scanner模块）
+# WiFi扫描（直接调用wifi_scanner模块 + 已保存列表回退）
 # ============================================================
+def get_saved_wifi_list(interface="en0"):
+    """
+    获取Mac已保存的WiFi列表（不受位置权限限制）
+    返回: [ssid1, ssid2, ...]
+    """
+    try:
+        r = subprocess.run(
+            ["networksetup", "-listpreferredwirelessnetworks", interface],
+            capture_output=True, text=True, timeout=10
+        )
+        lines = r.stdout.strip().split("\n")
+        # 第一行是标题 "Preferred networks on en0:"，后续每行是一个SSID（有缩进）
+        ssids = []
+        for line in lines[1:]:
+            ssid = line.strip()
+            if ssid:
+                ssids.append(ssid)
+        return ssids
+    except Exception:
+        return []
+
+
 def scan_wifi_targets():
     """
     扫描周围WiFi并返回家庭WiFi列表
-    返回: [(ssid, rssi, security, brand_difficulty), ...]
+    策略：
+      1. 先用CoreWLAN扫描（可获取SSID/信号/安全类型等详细信息）
+      2. 若SSID全为空（位置权限受限），回退到Mac已保存WiFi列表
+    返回: [dict, ...]
     """
     print(f"{CYAN}[*] 正在扫描周围WiFi...{RESET}")
 
+    # 导入扫描器模块
+    sys.path.insert(0, str(SCRIPT_DIR))
     try:
-        # 导入扫描器模块
-        sys.path.insert(0, str(SCRIPT_DIR))
         from wifi_scanner import scan, estimate_password_strength
-    except ImportError as e:
-        print(f"{RED}[!] 导入wifi_scanner失败: {e}{RESET}")
-        return []
+        _has_scanner = True
+    except ImportError:
+        _has_scanner = False
 
-    nets, cur = scan()
-    if not nets:
-        print(f"{RED}[!] 未扫描到任何WiFi网络{RESET}")
-        return []
+        # 简单回退：仅做品牌识别
+        def estimate_password_strength(ssid, security=""):
+            return {"brand": "未知", "difficulty": "中", "strategy": "通用字典",
+                    "estimated_time": "", "notes": ""}
 
-    # 过滤出家庭WiFi（有SSID且类型为home或unknown）
+    # 尝试CoreWLAN扫描
     targets = []
     cracked = load_cracked()
+    has_ssid = False
 
-    for n in nets:
-        ssid = n.get("ssid", "")
-        if not ssid:
-            continue
+    if _has_scanner:
+        nets, cur = scan()
+        if nets:
+            for n in nets:
+                ssid = n.get("ssid", "")
+                if ssid:
+                    has_ssid = True
+                    net_type = n.get("type", "unknown")
+                    if net_type not in ("home", "unknown"):
+                        continue
+                    if ssid in cracked:
+                        continue
+                    security = n.get("security", "")
+                    strength = estimate_password_strength(ssid, security)
+                    if strength["difficulty"] in ("无", "极高"):
+                        continue
+                    targets.append({
+                        "ssid": ssid,
+                        "rssi": n.get("rssi", -100),
+                        "channel": n.get("channel", 0),
+                        "band": n.get("band", ""),
+                        "security": security,
+                        "brand": strength["brand"],
+                        "difficulty": strength["difficulty"],
+                        "strategy": strength["strategy"],
+                    })
 
-        net_type = n.get("type", "unknown")
-        if net_type not in ("home", "unknown"):
-            continue
+    # 回退：SSID全为空时，从Mac已保存WiFi列表获取目标
+    if not has_ssid or not targets:
+        print(f"{YELLOW}[*] SSID被隐藏（macOS位置权限限制），回退到已保存WiFi列表{RESET}")
+        saved = get_saved_wifi_list()
+        if not saved:
+            print(f"{RED}[!] 无法获取已保存WiFi列表{RESET}")
+            return []
 
-        # 跳过已破解的
-        if ssid in cracked:
-            continue
+        print(f"    已保存WiFi: {len(saved)} 个")
 
-        # 密码强度预估
-        security = n.get("security", "")
-        strength = estimate_password_strength(ssid, security)
+        # 过滤非攻击目标关键词
+        skip_keywords = [
+            # 校园网
+            "eduroam", "cmcc-edu", "ixaut", "snut",
+            # 运营商公共WiFi
+            "chinanet-", "chinaunicom",
+            # 手机热点（不是路由器WiFi）
+            "iphone", "xiaomi", "huawei", "oppo", "vivo", "redmi",
+            "iqoo", "oneplus", "realme", "samsung", "mi ",
+            # 酒店/商户（非家庭WiFi）
+            "hotel", "酒店", "passengers",
+            # 用户自己的设备（根据已保存列表中的特征过滤）
+            "传康", "crazyk", "@crazyk", "crazy14", "crazy//",
+        ]
 
-        # 跳过开放网络和企业网络
-        if strength["difficulty"] in ("无", "极高"):
-            continue
+        for ssid in saved:
+            if ssid in cracked:
+                continue
 
-        targets.append({
-            "ssid": ssid,
-            "rssi": n.get("rssi", -100),
-            "channel": n.get("channel", 0),
-            "band": n.get("band", ""),
-            "security": security,
-            "brand": strength["brand"],
-            "difficulty": strength["difficulty"],
-            "strategy": strength["strategy"],
-        })
+            # 跳过明显的手机热点和校园网（简单过滤）
+            ssid_lower = ssid.lower()
+            is_skip = False
+            for kw in skip_keywords:
+                if kw in ssid_lower:
+                    is_skip = True
+                    break
+            if is_skip:
+                continue
+
+            strength = estimate_password_strength(ssid)
+            if strength["difficulty"] in ("无", "极高"):
+                continue
+
+            targets.append({
+                "ssid": ssid,
+                "rssi": -60,  # 默认信号强度（已保存WiFi无法获取实时信号）
+                "channel": 0,
+                "band": "",
+                "security": "WPA2",  # 默认假设WPA2
+                "brand": strength["brand"],
+                "difficulty": strength["difficulty"],
+                "strategy": strength["strategy"],
+            })
 
     # 排序：低难度优先，同难度按信号强度排序
     difficulty_order = {"低": 0, "中": 1, "高": 2}
