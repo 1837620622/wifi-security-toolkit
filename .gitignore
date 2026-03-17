@@ -1,26 +1,20 @@
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-*.spec
-
-# 大字典文件（用户运行时自动生成）
-wordlists/wifi_dict_final.txt
-wordlists/online/chinese_top100000.txt
-
-# 运行时生成
-captures/
-wifi-scanner
+# Go编译产物
+wifi-crack
+*.exe
+*.test
+*.out
 
 # 系统文件
 .DS_Store
 Thumbs.db
 
-# 握手包文件
-*.hc22000
-*.cap
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 临时文件
+/tmp/
 *.pcap
-*.pcapng
-*.hccapx
+*.cap
