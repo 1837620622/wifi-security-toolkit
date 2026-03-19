@@ -14,6 +14,7 @@
 | **Windows 版** | `wifi-crack-windows/` | Python + pywifi + netsh + hashcat CUDA | Windows 用户，NVIDIA GPU 加速 |
 | **Notebook 版** | `wifi-crack-notebook/` | Jupyter + Kaggle 免费 GPU | 无本地 GPU，利用云端免费算力 |
 | **云服务器版** | `wifi-crack-cloud/` | Bash + hashcat CUDA | 腾讯云/阿里云 GPU 服务器一键破解 |
+| **握手包捕获工具** | `wifi-handshake-capture/` | Python + netsh/Scapy | Windows交互式捕获，可打包EXE |
 | **Python 跨平台版** | `wifi-crack-python/` | Python + pywifi + GUI | 跨平台图形界面，来源 wlan-sec-test-tool |
 
 ## 核心功能
