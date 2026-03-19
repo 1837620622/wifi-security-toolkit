@@ -134,7 +134,7 @@ sudo ./wifi-crack --capture -t "目标SSID"
 
 ```
 .
-├── main.go                          # 主程序入口（三种模式流程编排）
+├── main.go                          # 主程序入口（智能攻击编排 + 三种模式）
 ├── go.mod                           # Go 模块定义
 ├── internal/
 │   ├── scanner/
@@ -145,10 +145,16 @@ sudo ./wifi-crack --capture -t "目标SSID"
 │   │   └── capture.go               # 握手包捕获（tcpdump监控 + bettercap deauth）
 │   ├── hashcrack/
 │   │   └── hashcrack.go             # hashcat GPU离线破解（字典+掩码+混合）
+│   ├── p3wifi/
+│   │   └── p3wifi.go                # 全球WiFi密码库（3wifi.dev API + wpa-sec字典）
 │   ├── dict/
 │   │   └── dict.go                  # 中国定制字典（静态 + 动态生成器）
 │   └── masterkey/
-│       └── masterkey.go             # 万能钥匙API（多端点 + 优雅降级）
+│       └── masterkey.go             # [已废弃] 万能钥匙API
+├── tools-python/                    # 第三方Python WiFi安全测试工具（来源: baihengaead/wlan-sec-test-tool）
+│   ├── wifi_macos.py                # macOS专用WiFi测试脚本
+│   ├── wlan_sec_test_tool.py        # 跨平台WiFi安全测试主程序
+│   └── wlan_sec_test_tool_gui.py    # GUI图形界面版本
 ├── captures/                        # 握手包捕获输出目录（自动创建）
 ├── HARDWARE_REPORT.md               # 硬件能力评估报告
 ├── generate_dict.py                 # Python字典生成器
