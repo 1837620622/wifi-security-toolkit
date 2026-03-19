@@ -148,7 +148,11 @@ def scan_wifi() -> List[WiFiNetwork]:
 # 获取本机WiFi MAC地址
 # ============================================================================
 def get_local_mac() -> str:
-    """获取本机WiFi网卡MAC地址"""
+    """获取本机WiFi网卡MAC地址（多种方式尝试）"""
+    import re as _re
+    mac_pattern = _re.compile(r'([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}')
+    
+    # 方式1: netsh wlan show interfaces
     try:
         result = subprocess.run(
             ['netsh', 'wlan', 'show', 'interfaces'],
@@ -156,11 +160,57 @@ def get_local_mac() -> str:
             encoding='utf-8', errors='replace'
         )
         for line in result.stdout.split('\n'):
-            if '物理地址' in line or 'Physical address' in line.lower():
-                mac = line.split(':', 1)[-1].strip() if ':' in line else ""
-                return mac.replace(':', '').replace('-', '').lower()
+            # 匹配中英文关键字
+            if '物理地址' in line or 'physical address' in line.lower():
+                m = mac_pattern.search(line)
+                if m:
+                    return m.group(0).replace(':', '').replace('-', '').lower()
     except:
         pass
+    
+    # 方式2: getmac命令
+    try:
+        result = subprocess.run(
+            ['getmac', '/v', '/fo', 'list'],
+            capture_output=True, text=True, timeout=5,
+            encoding='utf-8', errors='replace'
+        )
+        # 查找WiFi相关的MAC
+        lines = result.stdout.split('\n')
+        found_wifi = False
+        for line in lines:
+            if 'wi-fi' in line.lower() or 'wlan' in line.lower() or 'wireless' in line.lower():
+                found_wifi = True
+            if found_wifi:
+                m = mac_pattern.search(line)
+                if m:
+                    return m.group(0).replace(':', '').replace('-', '').lower()
+    except:
+        pass
+    
+    # 方式3: ipconfig /all
+    try:
+        result = subprocess.run(
+            ['ipconfig', '/all'],
+            capture_output=True, text=True, timeout=5,
+            encoding='utf-8', errors='replace'
+        )
+        lines = result.stdout.split('\n')
+        found_wifi = False
+        for line in lines:
+            if 'wi-fi' in line.lower() or 'wlan' in line.lower() or 'wireless' in line.lower():
+                found_wifi = True
+            if found_wifi and ('物理地址' in line or 'physical address' in line.lower()):
+                m = mac_pattern.search(line)
+                if m:
+                    return m.group(0).replace(':', '').replace('-', '').lower()
+    except:
+        pass
+    
+    print("    [!] 无法获取WiFi MAC地址，请手动输入")
+    mac_input = input("    WiFi MAC地址 (如 aa:bb:cc:dd:ee:ff): ").strip()
+    if mac_input:
+        return mac_input.replace(':', '').replace('-', '').lower()
     return "000000000000"
 
 # ============================================================================
