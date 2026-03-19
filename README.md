@@ -90,6 +90,10 @@ brew cleanup --prune=all
 ./wifi-crack -t "TP-LINK_XXXX"
 ./wifi-crack -d /path/to/dict.txt
 
+# ── 交互选择模式: 列出全部WiFi，手动单选/多选 ──
+./wifi-crack --all
+./wifi-crack --all --scan
+
 # ── 握手包捕获 + GPU离线破解（需sudo） ──
 sudo ./wifi-crack --capture
 sudo ./wifi-crack --capture -t "目标SSID"
@@ -108,6 +112,7 @@ sudo ./wifi-crack --capture -t "目标SSID"
 | `-d` | 空 | 外部字典文件路径 |
 | `--delay` | 200 | 在线爆破每次尝试间隔（毫秒） |
 | `--scan` | false | 仅扫描不爆破 |
+| `--all` | false | 显示全部WiFi（不过滤），交互式选择目标 |
 | `--capture` | false | 握手包捕获+GPU离线破解模式 |
 | `--hashcat` | false | hashcat GPU独立破解模式 |
 | `--hash` | 空 | hashcat哈希文件路径（.22000格式） |

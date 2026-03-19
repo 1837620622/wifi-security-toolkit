@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 	"wifi-crack/internal/capture"
 	"wifi-crack/internal/cracker"
@@ -36,6 +40,7 @@ func main() {
 	dictFile := flag.String("d", "", "额外字典文件路径")
 	delay := flag.Int("delay", 200, "每次尝试间隔（毫秒）")
 	scanOnly := flag.Bool("scan", false, "仅扫描，不爆破")
+	showAll := flag.Bool("all", false, "显示全部WiFi（不过滤），交互式选择目标")
 	captureMode := flag.Bool("capture", false, "握手包捕获模式（tcpdump+bettercap）")
 	hashcatMode := flag.Bool("hashcat", false, "hashcat GPU离线破解模式")
 	hashFile := flag.String("hash", "", "hashcat哈希文件路径（.22000格式，配合--hashcat使用）")
@@ -93,14 +98,30 @@ func main() {
 	fmt.Printf("  [+] 扫描到 %d 个WiFi网络\n", len(nets))
 
 	// ============================================================
-	// 阶段2：过滤目标
+	// 阶段2：过滤目标 或 显示全部（--all模式）
 	// ============================================================
-	fmt.Println("  [2/3] 过滤目标（排除校园网/Portal/企业网/开放网络）...")
-
 	var targets []scanner.WiFiNetwork
 
-	if *target != "" {
-		// 指定目标模式：在扫描结果中查找
+	if *showAll {
+		// --all模式：不过滤，显示全部WiFi，用户交互选择
+		fmt.Println("  [2/3] 列出全部WiFi网络（不过滤）...")
+		allNets := sortBySignal(nets)
+		printWiFiTable(allNets, "全部WiFi网络")
+
+		if *scanOnly {
+			fmt.Println("\n  [*] 扫描完成（--scan --all 模式）")
+			return
+		}
+
+		// 交互式选择目标
+		targets = interactiveSelect(allNets)
+		if len(targets) == 0 {
+			fmt.Println("\n  [!] 未选择任何目标")
+			return
+		}
+	} else if *target != "" {
+		fmt.Println("  [2/3] 查找指定目标...")
+		// 指定目标模式
 		for _, n := range nets {
 			if n.SSID == *target {
 				targets = append(targets, n)
@@ -111,21 +132,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "  [!] 未找到目标: %s\n", *target)
 			os.Exit(1)
 		}
+		printWiFiTable(targets, "指定目标")
 	} else {
-		// 自动模式：过滤+排序
+		fmt.Println("  [2/3] 过滤目标（排除校园网/Portal/企业网/开放网络）...")
 		targets = scanner.FilterAndSort(nets)
+		printWiFiTable(targets, "可爆破目标")
 	}
-
-	// 打印目标列表
-	fmt.Printf("\n  可爆破目标 (%d 个):\n", len(targets))
-	fmt.Println("  ┌────┬──────────────────────────┬────────┬──────────┬─────┐")
-	fmt.Println("  │ #  │ SSID                     │ 信号   │ 安全类型 │ 频道│")
-	fmt.Println("  ├────┼──────────────────────────┼────────┼──────────┼─────┤")
-	for i, n := range targets {
-		fmt.Printf("  │ %-2d │ %-24s │ %4d   │ %-8s │ %-3d │\n",
-			i+1, truncStr(n.SSID, 24), n.RSSI, n.Security, n.Channel)
-	}
-	fmt.Println("  └────┴──────────────────────────┴────────┴──────────┴─────┘")
 
 	if len(targets) == 0 {
 		fmt.Println("\n  [!] 没有可爆破的目标")
@@ -286,6 +298,157 @@ func truncStr(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen-1]) + "…"
+}
+
+// ============================================================
+// printWiFiTable 打印WiFi列表表格
+// ============================================================
+func printWiFiTable(nets []scanner.WiFiNetwork, title string) {
+	fmt.Printf("\n  %s (%d 个):\n", title, len(nets))
+	fmt.Println("  ┌─────┬──────────────────────────┬────────┬────────────┬─────┬───────────────────┐")
+	fmt.Println("  │  #  │ SSID                     │ 信号   │ 安全类型   │ 频道│ BSSID             │")
+	fmt.Println("  ├─────┼──────────────────────────┼────────┼────────────┼─────┼───────────────────┤")
+	for i, n := range nets {
+		fmt.Printf("  │ %-3d │ %-24s │ %4d   │ %-10s │ %-3d │ %-17s │\n",
+			i+1, truncStr(n.SSID, 24), n.RSSI, n.Security, n.Channel, n.BSSID)
+	}
+	fmt.Println("  └─────┴──────────────────────────┴────────┴────────────┴─────┴───────────────────┘")
+}
+
+// ============================================================
+// sortBySignal 按信号强度从强到弱排序（不过滤，保留全部）
+// ============================================================
+func sortBySignal(nets []scanner.WiFiNetwork) []scanner.WiFiNetwork {
+	// 先按SSID去重（保留信号最强的）
+	best := make(map[string]scanner.WiFiNetwork)
+	for _, n := range nets {
+		if n.SSID == "" {
+			continue
+		}
+		if existing, ok := best[n.SSID]; ok {
+			if n.RSSI > existing.RSSI {
+				best[n.SSID] = n
+			}
+		} else {
+			best[n.SSID] = n
+		}
+	}
+	result := make([]scanner.WiFiNetwork, 0, len(best))
+	for _, n := range best {
+		result = append(result, n)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].RSSI > result[j].RSSI
+	})
+	return result
+}
+
+// ============================================================
+// interactiveSelect 交互式选择WiFi目标（支持单选和多选）
+// 输入格式: 单个数字(如 3)、逗号分隔(如 1,3,5)、范围(如 1-5)、all(全选)
+// ============================================================
+func interactiveSelect(nets []scanner.WiFiNetwork) []scanner.WiFiNetwork {
+	fmt.Println("\n  ╔══════════════════════════════════════════════╗")
+	fmt.Println("  ║          交互式目标选择                      ║")
+	fmt.Println("  ╠══════════════════════════════════════════════╣")
+	fmt.Println("  ║  输入编号选择目标，支持以下格式：            ║")
+	fmt.Println("  ║    单选:  3                                  ║")
+	fmt.Println("  ║    多选:  1,3,5                              ║")
+	fmt.Println("  ║    范围:  1-5                                ║")
+	fmt.Println("  ║    混合:  1,3-5,8                            ║")
+	fmt.Println("  ║    全选:  all                                ║")
+	fmt.Println("  ║    退出:  q                                  ║")
+	fmt.Println("  ╚══════════════════════════════════════════════╝")
+	fmt.Print("\n  请选择目标: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return nil
+	}
+	input = strings.TrimSpace(input)
+
+	if input == "" || input == "q" || input == "Q" {
+		return nil
+	}
+
+	// 全选
+	if strings.ToLower(input) == "all" {
+		fmt.Printf("  [+] 已选择全部 %d 个目标\n", len(nets))
+		return nets
+	}
+
+	// 解析选择的编号
+	selected := parseSelection(input, len(nets))
+	if len(selected) == 0 {
+		fmt.Println("  [!] 无效的输入")
+		return nil
+	}
+
+	// 构建目标列表
+	var targets []scanner.WiFiNetwork
+	for _, idx := range selected {
+		targets = append(targets, nets[idx])
+	}
+
+	// 打印已选目标
+	fmt.Printf("\n  [+] 已选择 %d 个目标:\n", len(targets))
+	for i, t := range targets {
+		fmt.Printf("      %d. %s (%s, %ddBm)\n", i+1, t.SSID, t.Security, t.RSSI)
+	}
+
+	return targets
+}
+
+// ============================================================
+// parseSelection 解析用户输入的选择字符串
+// 支持: "3", "1,3,5", "1-5", "1,3-5,8" 等格式
+// 返回: 0-based索引列表
+// ============================================================
+func parseSelection(input string, maxLen int) []int {
+	seen := make(map[int]bool)
+	var result []int
+
+	parts := strings.Split(input, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// 检查是否是范围格式 (如 "1-5")
+		if strings.Contains(part, "-") {
+			rangeParts := strings.SplitN(part, "-", 2)
+			start, err1 := strconv.Atoi(strings.TrimSpace(rangeParts[0]))
+			end, err2 := strconv.Atoi(strings.TrimSpace(rangeParts[1]))
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			if start > end {
+				start, end = end, start
+			}
+			for i := start; i <= end; i++ {
+				idx := i - 1 // 转为0-based
+				if idx >= 0 && idx < maxLen && !seen[idx] {
+					seen[idx] = true
+					result = append(result, idx)
+				}
+			}
+		} else {
+			// 单个数字
+			num, err := strconv.Atoi(part)
+			if err != nil {
+				continue
+			}
+			idx := num - 1 // 转为0-based
+			if idx >= 0 && idx < maxLen && !seen[idx] {
+				seen[idx] = true
+				result = append(result, idx)
+			}
+		}
+	}
+
+	return result
 }
 
 // ============================================================
