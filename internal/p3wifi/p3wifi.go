@@ -1,11 +1,14 @@
 package p3wifi
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -228,6 +231,71 @@ func apiQuery(queryType, queryValue string) (map[string][]WiFiRecord, error) {
 	}
 
 	return apiResp.Data, nil
+}
+
+// ============================================================
+// DownloadWPASecDict 下载wpa-sec.stanev.org已破解密码字典
+// 这是全球社区分布式破解的真实WiFi密码，按频率排序
+// 文件大小约3.5MB（gzip压缩），解压后约20MB
+// ============================================================
+func DownloadWPASecDict(outputPath string) (int, error) {
+	dictURL := "https://wpa-sec.stanev.org/dict/cracked.txt.gz"
+
+	req, err := http.NewRequest("GET", dictURL, nil)
+	if err != nil {
+		return 0, fmt.Errorf("构建请求失败: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("下载失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// 读取gzip压缩的内容
+	compressed, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("读取失败: %w", err)
+	}
+
+	// 解压gzip
+	gzReader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		return 0, fmt.Errorf("gzip解压失败: %w", err)
+	}
+	defer gzReader.Close()
+
+	data, err := io.ReadAll(gzReader)
+	if err != nil {
+		return 0, fmt.Errorf("解压读取失败: %w", err)
+	}
+
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return 0, fmt.Errorf("创建文件失败: %w", err)
+	}
+	defer f.Close()
+
+	_, err = f.Write(data)
+	if err != nil {
+		return 0, fmt.Errorf("写入失败: %w", err)
+	}
+
+	// 统计行数
+	lineCount := 0
+	for _, b := range data {
+		if b == '\n' {
+			lineCount++
+		}
+	}
+
+	return lineCount, nil
 }
 
 // ============================================================
