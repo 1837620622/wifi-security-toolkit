@@ -401,11 +401,14 @@ func runHashcat(args []string, timeout time.Duration) (string, string, error) {
 
 	// 方式2：检查输出中是否包含Cracked状态
 	if strings.Contains(outStr, "Cracked") {
-		// 尝试用--show命令回查已破解密码
-		showArgs := make([]string, 0, len(args)+1)
+		// 用--show回查已破解密码
+		// 注意: --show需要potfile才能工作，所以必须移除--potfile-disable
+		// 同时--show不需要-w/-O等运行时参数
+		showArgs := []string{"-m", "22000"}
+		// 从原始参数中提取hash文件和字典/掩码（最后几个位置参数）
 		for _, a := range args {
-			// --show模式不需要workload和优化参数
-			if a != "-O" && !strings.HasPrefix(a, "-w") {
+			// 保留hash文件路径（包含.22000的参数）
+			if strings.HasSuffix(a, ".22000") || strings.HasSuffix(a, ".hc22000") {
 				showArgs = append(showArgs, a)
 			}
 		}
@@ -415,6 +418,9 @@ func runHashcat(args []string, timeout time.Duration) (string, string, error) {
 		if showErr == nil {
 			for _, line := range strings.Split(string(showOut), "\n") {
 				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
 				// hashcat --show输出格式: hash:password
 				if idx := strings.LastIndex(line, ":"); idx > 0 {
 					pwd := line[idx+1:]

