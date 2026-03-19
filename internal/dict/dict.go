@@ -196,11 +196,58 @@ func GenerateAllChinese() []string {
 	all = append(all, GenerateBirthdayPasswords()...)
 	all = append(all, GeneratePhonePasswords()...)
 	all = append(all, GenerateRepeatPatterns()...)
+	// 追加wpa-sec全球已破解密码字典（按频率排序，取前5000条高频）
+	if wpaSec := loadWPASecDict(); len(wpaSec) > 0 {
+		all = append(all, wpaSec...)
+	}
 	// 追加本地字典（如果存在）
 	if local := LoadLocalDict(); len(local) > 0 {
 		all = append(all, local...)
 	}
 	return MergeAndDedup(all)
+}
+
+// ============================================================
+// loadWPASecDict 加载wpa-sec全球已破解密码字典
+// 文件名: wpa-sec-cracked.txt（来源: wpa-sec.stanev.org）
+// 只取前5000条高频密码（完整75万条用于在线爆破不现实）
+// ============================================================
+func loadWPASecDict() []string {
+	const dictName = "wpa-sec-cracked.txt"
+	const maxLines = 5000
+
+	// 候选路径
+	candidates := []string{}
+	if exe, err := os.Executable(); err == nil {
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			candidates = append(candidates, filepath.Join(filepath.Dir(real), dictName))
+		}
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), dictName))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, dictName))
+	}
+
+	for _, path := range candidates {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+
+		var passwords []string
+		sc := bufio.NewScanner(f)
+		for sc.Scan() && len(passwords) < maxLines {
+			line := strings.TrimSpace(sc.Text())
+			if line != "" && len(line) >= 8 {
+				passwords = append(passwords, line)
+			}
+		}
+		if len(passwords) > 0 {
+			return passwords
+		}
+	}
+	return nil
 }
 
 // ============================================================
