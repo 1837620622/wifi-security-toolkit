@@ -128,7 +128,6 @@ func main() {
 		}
 	} else if *target != "" {
 		fmt.Println("  [2/3] 查找指定目标...")
-		// 指定目标模式
 		for _, n := range nets {
 			if n.SSID == *target {
 				targets = append(targets, n)
@@ -144,6 +143,24 @@ func main() {
 		fmt.Println("  [2/3] 过滤目标（排除校园网/Portal/企业网/开放网络）...")
 		targets = scanner.FilterAndSort(nets)
 		printWiFiTable(targets, "可爆破目标")
+
+		if len(targets) == 0 {
+			fmt.Println("\n  [!] 没有可爆破的目标（试试 --all 查看全部WiFi）")
+			return
+		}
+
+		// 仅扫描模式到此结束
+		if *scanOnly {
+			fmt.Println("\n  [*] 扫描完成（--scan 模式，不执行爆破）")
+			return
+		}
+
+		// 默认模式也进入交互选择（让用户选择要攻击哪些目标）
+		targets = interactiveSelect(targets)
+		if len(targets) == 0 {
+			fmt.Println("\n  [!] 未选择任何目标")
+			return
+		}
 	}
 
 	if len(targets) == 0 {
@@ -723,13 +740,14 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		} else {
 			// 输出跳过原因
 			if !hasSudo {
-				fmt.Println("  [Phase 3-4] 跳过GPU攻击（无sudo权限，请用 sudo ./wifi-crack --all 运行）")
+				fmt.Println("  [Phase 3-4] 跳过GPU攻击（无sudo权限）")
+				fmt.Println("    提示: 先在终端运行 sudo -v 缓存密码，再运行 ./wifi-crack --all")
 			} else if len(missingTools) > 0 {
 				fmt.Printf("  [Phase 3-4] 跳过GPU攻击（缺少工具: %s）\n", strings.Join(missingTools, ", "))
 			}
 		}
 
-		// ── Phase 5: CoreWLAN在线字典爆破（兆底，排除Phase 2已试的TOP密码） ──
+		// ── Phase 5: CoreWLAN在线字典爆破（兜底，排除Phase 2已试的TOP密码） ──
 		// 如果GPU攻击已完成字典+8位数字暴力都未命中，在线爆破也极不可能成功，跳过
 		if gpuDone {
 			fmt.Println("  [Phase 5] 跳过在线爆破（GPU已完成字典+暴力均未命中，在线更慢无意义）")
