@@ -710,13 +710,9 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 				fmt.Printf("    ✗ 握手包捕获失败: %s\n", capResult.Error)
 			}
 		} else {
-			// 输出跳过原因
-			if !hasSudo {
-				fmt.Println("  [Phase 3-4] 跳过GPU攻击（无sudo权限）")
-				fmt.Println("    提示: 先在终端运行 sudo -v 缓存密码，再运行 ./wifi-crack --all")
-			} else if len(missingTools) > 0 {
-				fmt.Printf("  [Phase 3-4] 跳过GPU攻击（缺少工具: %s）\n", strings.Join(missingTools, ", "))
-			}
+			fmt.Println("  [Phase 3-4] 跳过握手捕获+GPU破解")
+			fmt.Println("    原因: macOS内置WiFi不支持帧注入（Apple驱动限制）")
+			fmt.Println("    解决: 买USB WiFi适配器(RTL8812AU约¥50) + Windows/Kali使用")
 		}
 
 		// ── Phase 5: CoreWLAN在线字典爆破（分层策略） ──
