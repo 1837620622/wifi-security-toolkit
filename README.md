@@ -1,6 +1,6 @@
 # WiFi Security Toolkit v3.0
 
-全平台 WiFi 安全测试工具集，支持 macOS / Windows / Kaggle 云端 GPU，集成全球密码库 + 智能攻击编排 + hashcat GPU 加速。
+全平台 WiFi 安全测试工具集，支持 macOS / Windows / 云服务器(腾讯云) / Kaggle，集成全球密码库 + 智能攻击编排 + hashcat GPU 加速。
 
 > **声明**: 仅限授权安全测试和网络安全学习使用，请遵守当地法律法规。未经授权访问他人网络属违法行为。
 
@@ -13,6 +13,7 @@
 | **macOS 版** | `wifi-crack-mac/` | Go + CoreWLAN + hashcat Metal | Mac 用户，Apple Silicon GPU 加速 |
 | **Windows 版** | `wifi-crack-windows/` | Python + pywifi + netsh + hashcat CUDA | Windows 用户，NVIDIA GPU 加速 |
 | **Notebook 版** | `wifi-crack-notebook/` | Jupyter + Kaggle 免费 GPU | 无本地 GPU，利用云端免费算力 |
+| **云服务器版** | `wifi-crack-cloud/` | Bash + hashcat CUDA | 腾讯云/阿里云 GPU 服务器一键破解 |
 | **Python 跨平台版** | `wifi-crack-python/` | Python + pywifi + GUI | 跨平台图形界面，来源 wlan-sec-test-tool |
 
 ## 核心功能
@@ -83,6 +84,17 @@ python wifi_crack.py --pmkid  # PMKID模式（推荐）
 
 详见 → [wifi-crack-notebook/README.md](wifi-crack-notebook/README.md)
 
+### 云服务器（腾讯云/阿里云）
+
+```bash
+# 上传到服务器后一键运行
+cd wifi-crack-cloud
+bash crack.sh handshake.22000    # 指定.22000文件
+bash crack.sh                    # 交互式粘贴hashline
+```
+
+详见 → [wifi-crack-cloud/README.md](wifi-crack-cloud/README.md)
+
 ### Python 跨平台 GUI 版
 
 ```bash
@@ -143,6 +155,10 @@ wifi-security-toolkit/
 ├── wifi-crack-notebook/              # Notebook版（Kaggle免费GPU破解）
 │   ├── kaggle-hashcat-wifi-crack.ipynb  # Kaggle GPU破解笔记本
 │   └── README.md                     #   Notebook版说明文档
+│
+├── wifi-crack-cloud/                 # 云服务器版（腾讯云/阿里云一键破解）
+│   ├── crack.sh                      #   一键破解脚本（安装+字典+9轮攻击）
+│   └── README.md                     #   云服务器版说明文档
 │
 ├── wifi-crack-python/                # Python跨平台版（GUI图形界面）
 │   ├── wlan_sec_test_tool.py         #   跨平台WiFi安全测试主程序
