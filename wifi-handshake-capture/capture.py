@@ -54,18 +54,32 @@ class CaptureResult:
 def scan_wifi() -> List[WiFiNetwork]:
     """用netsh扫描附近WiFi网络"""
     try:
-        # 先触发扫描刷新
-        subprocess.run(['netsh', 'wlan', 'disconnect'], capture_output=True,
-                      text=True, timeout=3, encoding='utf-8', errors='replace')
-        time.sleep(1)
-
-        result = subprocess.run(
-            ['netsh', 'wlan', 'show', 'networks', 'mode=bssid'],
-            capture_output=True, text=True, timeout=15,
-            encoding='utf-8', errors='replace'
-        )
-        if result.returncode != 0:
-            return []
+        # 不再断开WiFi（disconnect会导致部分网卡扫描失败）
+        # 直接扫描，如果结果为空则等待后重试
+        print("    扫描WiFi网络...")
+        
+        networks = []
+        for attempt in range(3):  # 最多重试3次
+            result = subprocess.run(
+                ['netsh', 'wlan', 'show', 'networks', 'mode=bssid'],
+                capture_output=True, text=True, timeout=15,
+                encoding='utf-8', errors='replace'
+            )
+            if result.returncode != 0:
+                print(f"    netsh返回错误(code={result.returncode})")
+                if result.stderr:
+                    print(f"    {result.stderr.strip()[:200]}")
+                return []
+            
+            # 检查是否有内容
+            if 'SSID' in result.stdout and 'BSSID' in result.stdout:
+                break  # 有结果，继续解析
+            
+            # 没结果，等待后重试
+            if attempt < 2:
+                wait = 3 * (attempt + 1)
+                print(f"    未扫描到网络，等待{wait}秒后重试({attempt+1}/3)...")
+                time.sleep(wait)
 
         networks = []
         current = {}
