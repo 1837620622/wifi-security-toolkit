@@ -463,12 +463,13 @@ try:
 except Exception as e:
     json.dump([], sys.stdout)
 `
-	// 按优先级尝试多个Python路径（需要有pyobjc/CoreWLAN模块）
+	// 按优先级尝试多个Python路径
+	// /usr/bin/python3 放最前（系统自带，sudo下也存在，且macOS自带CoreWLAN绑定）
+	// /usr/local/bin/python3 已在macOS 26.3中移除，不再列入
 	pythonPaths := []string{
+		"/usr/bin/python3",
 		"/opt/miniconda3/bin/python3",
 		"/opt/homebrew/bin/python3",
-		"/usr/local/bin/python3",
-		"/usr/bin/python3",
 	}
 
 	// 也尝试 PATH 中的 python3
