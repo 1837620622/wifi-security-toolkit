@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.etl
+*.cab
+captures/wifi_trace.*
+captures/wifi_crack_wordlist.txt
+hashcat-6.2.6/
+*.7z

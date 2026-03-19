@@ -28,3 +28,7 @@ captures/
 # 大型字典文件（超过1MB）
 wifi_dict.txt
 wpa-sec-cracked.txt
+wifi-crack-windows/wpa-sec-cracked.txt
+
+# hashcat二进制（277MB太大，用户自行下载）
+wifi-crack-windows/hashcat-6.2.6/
