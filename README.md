@@ -151,15 +151,15 @@ brew cleanup --prune=all
 # 列出全部WiFi → 交互选择 → 自动执行5阶段攻击
 ./wifi-crack --all
 
-# 带sudo运行（解锁Phase 3-4握手捕获+GPU破解）
-sudo ./wifi-crack --all
-
 # 交互选择 + 指定外部大字典
-sudo ./wifi-crack --all -d /path/to/big_wordlist.txt
+./wifi-crack --all -d /path/to/big_wordlist.txt
 
 # 交互选择 + 调整在线爆破间隔为100ms
-sudo ./wifi-crack --all --delay 100
+./wifi-crack --all --delay 100
 ```
+
+> 注意：不要用sudo运行主程序！sudo下macOS位置权限不可用，WiFi扫描会失败。
+> Phase 3握手捕获时，程序内部会自动调用sudo（tcpdump/bettercap需要root权限）。
 
 ### 默认自动模式（自动过滤 + 在线爆破）
 
@@ -292,7 +292,8 @@ sudo ./wifi-crack --capture -t "目标SSID" -d /path/to/dict.txt
 
 - macOS 需要授予终端位置权限才能获取SSID
 - `--all` 智能攻击模式为推荐使用方式
-- 握手包捕获（Phase 3-4）需要sudo权限，建议 `sudo ./wifi-crack --all`
+- **不要用sudo运行主程序**（sudo下macOS位置权限不可用，扫描会失败）
+- Phase 3握手捕获时程序内部会自动调用sudo（可能需要输入密码）
 - 全球密码库查询（Phase 1）需要网络连接
 - 操作结束后自动恢复原WiFi连接
 - 建议在终端中运行（非IDE终端）

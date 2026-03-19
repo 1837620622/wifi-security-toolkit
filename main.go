@@ -167,47 +167,40 @@ func main() {
 	}
 
 	// ============================================================
-	// 阶段3：万能钥匙预查询（需要网络，必须在爆破前完成）
-	// 注意：爆破会断开当前WiFi导致断网，所以查询必须先全部完成
+	// 阶段3：全球WiFi密码库预查询（需联网，必须在爆破前完成）
+	// 数据源：p3wifi(3wifi.dev) + 万能钥匙(备用,已废弃)
 	// ============================================================
-	fmt.Println("\n  [3/5] 万能钥匙密码预查询（需联网）...")
+	fmt.Println("\n  [3/5] 全球WiFi密码库预查询（需联网）...")
 
-	// 记录每个目标的万能钥匙查询结果
-	masterKeyPwds := make(map[string]string) // SSID → 万能钥匙密码
-	apiDown := false
+	masterKeyPwds := make(map[string]string) // SSID → 查到的密码
 	for i, t := range targets {
-		if apiDown {
-			break // API不可用，跳过剩余查询
-		}
 		if t.BSSID == "" {
 			fmt.Printf("    [%d/%d] %-20s BSSID为空，跳过\n", i+1, len(targets), t.SSID)
 			continue
 		}
-		fmt.Printf("    [%d/%d] %-20s 查询中...", i+1, len(targets), t.SSID)
+		fmt.Printf("    [%d/%d] %-20s ", i+1, len(targets), t.SSID)
 
-		pwd, err := masterkey.Query(t.SSID, t.BSSID)
-		if err != nil {
-			fmt.Printf(" %v\n", err)
-			// 检查API是否整体不可用
-			if !masterkey.Available() {
-				fmt.Println("    [!] 万能钥匙API不可用，跳过剩余查询（直接进入字典爆破）")
-				apiDown = true
-			}
+		// 优先查p3wifi全球密码库
+		pwd3, err3 := p3wifi.QueryByBSSID(t.BSSID)
+		if err3 == nil && pwd3 != "" {
+			fmt.Printf("✓ p3wifi命中! 密码=[%s]\n", pwd3)
+			masterKeyPwds[t.SSID] = pwd3
 			continue
 		}
 
-		if pwd != "" {
-			fmt.Printf(" ✓ 命中! 密码=[%s]\n", pwd)
-			masterKeyPwds[t.SSID] = pwd
-		} else {
-			fmt.Printf(" 未收录\n")
+		// p3wifi未收录时尝试万能钥匙备用（大概率也失败，优雅降级）
+		pwdMK, _ := masterkey.Query(t.SSID, t.BSSID)
+		if pwdMK != "" {
+			fmt.Printf("✓ 万能钥匙命中! 密码=[%s]\n", pwdMK)
+			masterKeyPwds[t.SSID] = pwdMK
+			continue
 		}
+
+		fmt.Printf("未收录\n")
 	}
 
 	if len(masterKeyPwds) > 0 {
-		fmt.Printf("\n  [+] 万能钥匙命中 %d 个目标（稍后验证连接）\n", len(masterKeyPwds))
-	} else if apiDown {
-		fmt.Println("  [!] 万能钥匙服务暂不可用，将仅使用字典爆破")
+		fmt.Printf("\n  [+] 密码库命中 %d 个目标（稍后验证连接）\n", len(masterKeyPwds))
 	}
 
 	// ============================================================
