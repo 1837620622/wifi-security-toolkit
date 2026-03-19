@@ -72,9 +72,9 @@ func main() {
 	locStatus := scanner.LocationStatus()
 	fmt.Printf("  [0/3] 位置权限: %s\n", locStatus)
 	if locStatus != "已授权" {
-		fmt.Println("  [!] 位置权限未授予，SSID可能不可见")
-		fmt.Println("  [!] 请前往: 系统设置 > 隐私与安全 > 定位服务 > 授权终端")
-		fmt.Println("  [!] 或运行: sudo /usr/bin/python3 -c \"import CoreLocation\"")
+		fmt.Println("  [!] 位置权限未授予，SSID可能不可见（但不影响扫描BSSID和信号）")
+		fmt.Println("  [!] 授权方法: 系统设置 → 隐私与安全 → 定位服务 → 打开 → 找到终端/iTerm → 勾选允许")
+		fmt.Println("  [!] 提示: 不要用sudo运行本程序（sudo下位置权限不可用）")
 		fmt.Println()
 	}
 
