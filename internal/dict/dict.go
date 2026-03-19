@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -186,6 +188,7 @@ func GenerateRepeatPatterns() []string {
 // ============================================================
 // GenerateAllChinese 合并所有中国定制密码
 // 按优先级排列，高命中率优先
+// 同时自动加载本地 wifi_dict.txt（如果存在）
 // ============================================================
 func GenerateAllChinese() []string {
 	var all []string
@@ -193,6 +196,10 @@ func GenerateAllChinese() []string {
 	all = append(all, GenerateBirthdayPasswords()...)
 	all = append(all, GeneratePhonePasswords()...)
 	all = append(all, GenerateRepeatPatterns()...)
+	// 追加本地字典（如果存在）
+	if local := LoadLocalDict(); len(local) > 0 {
+		all = append(all, local...)
+	}
 	return MergeAndDedup(all)
 }
 
@@ -222,6 +229,53 @@ func LoadDictFile(path string) ([]string, error) {
 	}
 
 	return passwords, sc.Err()
+}
+
+// ============================================================
+// LoadLocalDict 自动检测并加载本地字典文件
+// 检测顺序：
+//  1. 可执行文件所在目录下的 wifi_dict.txt
+//  2. 当前工作目录下的 wifi_dict.txt
+//
+// 如果文件不存在则静默返回 nil（不报错）
+// ============================================================
+func LoadLocalDict() []string {
+	const dictName = "wifi_dict.txt"
+
+	// 候选路径列表
+	candidates := []string{}
+
+	// 1. 可执行文件所在目录
+	if exePath, err := exec.LookPath(os.Args[0]); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), dictName))
+	}
+	// os.Executable() 更可靠（已处理符号链接）
+	if exe, err := os.Executable(); err == nil {
+		// Eval symlinks 获取真实路径
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			candidates = append(candidates, filepath.Join(filepath.Dir(real), dictName))
+		}
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), dictName))
+	}
+
+	// 2. 当前工作目录
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, dictName))
+	}
+
+	// 逐个尝试，找到第一个存在的文件
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			// 文件存在，尝试加载
+			passwords, err := LoadDictFile(path)
+			if err == nil && len(passwords) > 0 {
+				return passwords
+			}
+		}
+	}
+
+	// 未找到本地字典，静默返回 nil
+	return nil
 }
 
 // ============================================================

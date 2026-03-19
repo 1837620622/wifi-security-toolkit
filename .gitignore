@@ -18,3 +18,12 @@ Thumbs.db
 /tmp/
 *.pcap
 *.cap
+*.pcapng
+*.hccapx
+*.22000
+
+# 捕获输出目录
+captures/
+
+# 大型字典文件（超过1MB）
+wifi_dict.txt

