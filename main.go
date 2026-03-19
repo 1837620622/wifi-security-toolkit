@@ -27,7 +27,7 @@ const (
 	banner  = `
   ╔══════════════════════════════════════════════════╗
   ║   WiFi Cracker v%s (Go + CoreWLAN + hashcat)  ║
-  ║   万能钥匙 + 握手包捕获 + GPU离线破解          ║
+  ║   全球密码库 + 握手包捕获 + GPU离线破解          ║
   ║   macOS 专用 · 仅限授权安全测试                ║
   ╚══════════════════════════════════════════════════╝
 `
@@ -531,15 +531,25 @@ func runHashcatOnly(hashFilePath, dictFilePath string, maskOnly, verbose bool) {
 //   Phase 5（兜底）：CoreWLAN在线完整字典爆破
 //
 // 工具协作逻辑：
-//   万能钥匙(API) → CoreWLAN(验证) → tcpdump(捕获) → bettercap(deauth)
+//   CoreWLAN(验证) → tcpdump(捕获) → bettercap(deauth)
 //   → hcxpcapngtool(转换) → hashcat(GPU破解) → CoreWLAN(兜底爆破)
 // ============================================================
 func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, verbose bool) {
 	start := time.Now()
-	fmt.Println("\n  ╔══════════════════════════════════════════════════╗")
-	fmt.Println("  ║        智能攻击编排器 (Smart Attack)              ║")
-	fmt.Println("  ║  万能钥匙 → 快速验证 → 握手捕获 → GPU破解 → 兜底 ║")
-	fmt.Println("  ╚══════════════════════════════════════════════════╝")
+	fmt.Println("\n  ╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("  ║        智能攻击编排器 (Smart Attack)                    ║")
+	fmt.Println("  ║  密码库查询 → TOP密码 → 握手捕获 → GPU破解 → 字典爆破  ║")
+	fmt.Println("  ╠══════════════════════════════════════════════════════════╣")
+	fmt.Println("  ║  适用目标:                                              ║")
+	fmt.Println("  ║  ✓ WPA2-Personal  — 字典/暴力可破（弱密码极易）        ║")
+	fmt.Println("  ║  ✓ WPA/WPA2混合   — 同上，兼容模式更容易               ║")
+	fmt.Println("  ║  △ WPA3-Transition — 可降级为WPA2后破解               ║")
+	fmt.Println("  ║  ✗ WPA3-Only       — SAE阻止离线破解（极难）         ║")
+	fmt.Println("  ║  ✗ WPA2-Enterprise — 需要证书，字典无效              ║")
+	fmt.Println("  ║  ✗ OWE/Open        — 无密码或仅加密传输              ║")
+	fmt.Println("  ║  关键因素: 密码强度 > 加密类型 > 路由器型号           ║")
+	fmt.Println("  ║  8位纯数字密码约32分钟可穷举，12位混合密码几乎不可能  ║")
+	fmt.Println("  ╚══════════════════════════════════════════════════════════╝")
 
 	// 记录原始WiFi用于最后恢复
 	originalSSID := scanner.CurrentSSID()
@@ -554,7 +564,7 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 
 		// ── Phase 1: 全球WiFi密码库查询（秒级） ──
 		// 优先用p3wifi（3wifi.dev全球开放数据库），万能钥匙作为备用
-		fmt.Println("  [Phase 1] 全球WiFi密码库查询（p3wifi + 万能钥匙）...")
+		fmt.Println("  [Phase 1] 全球WiFi密码库查询（p3wifi 3wifi.dev）...")
 		if t.BSSID != "" {
 			phase1Hit := false
 
