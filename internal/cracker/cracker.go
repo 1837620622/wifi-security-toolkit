@@ -230,6 +230,101 @@ func GenerateRouterDefaults(ssid string) []string {
 }
 
 // ============================================================
+// GenerateSSIDSmart 根据SSID特征智能生成针对性密码
+// 分析SSID中的数字、字母模式，生成高命中率密码
+// 例如 SSID="13072" → 密码可能包含13072
+// ============================================================
+func GenerateSSIDSmart(ssid string) []string {
+	var pwds []string
+
+	// 提取SSID中的所有数字
+	digits := extractDigits(ssid)
+
+	if len(digits) >= 3 {
+		// SSID含数字（如"13072"、"714"、"AP-5G-029C"）
+		// 数字本身作为密码的一部分
+		if len(digits) >= 8 {
+			pwds = append(pwds, digits) // 数字本身就够8位
+		}
+
+		// 数字重复补到8位
+		for len(digits) < 8 {
+			digits += digits
+		}
+		pwds = append(pwds, digits[:8])
+		if len(digits) >= 9 {
+			pwds = append(pwds, digits[:9])
+		}
+
+		// 数字+常见后缀
+		d := extractDigits(ssid)
+		suffixes := []string{"0000", "1234", "8888", "6666", "0123", "abcd", "wifi"}
+		for _, s := range suffixes {
+			combo := d + s
+			if len(combo) >= 8 {
+				pwds = append(pwds, combo[:min(len(combo), 11)])
+			}
+			combo2 := s + d
+			if len(combo2) >= 8 {
+				pwds = append(pwds, combo2[:min(len(combo2), 11)])
+			}
+		}
+
+		// 门牌号/宿舍号模式（如"13072"→尝试"13072"+4位数字）
+		if len(d) >= 3 && len(d) <= 5 {
+			for i := 0; i <= 9; i++ {
+				for j := 0; j <= 9; j++ {
+					for k := 0; k <= 9; k++ {
+						extra := fmt.Sprintf("%d%d%d", i, j, k)
+						p := d + extra
+						if len(p) >= 8 && len(p) <= 11 {
+							pwds = append(pwds, p)
+						}
+						p2 := extra + d
+						if len(p2) >= 8 && len(p2) <= 11 {
+							pwds = append(pwds, p2)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// SSID本身（中文/英文）作为密码的一部分
+	lower := strings.ToLower(ssid)
+	if len(lower) >= 8 {
+		pwds = append(pwds, lower)
+	}
+	// SSID+数字
+	for _, suffix := range []string{"123", "1234", "12345", "666", "888", "000", "111"} {
+		combo := lower + suffix
+		if len(combo) >= 8 {
+			pwds = append(pwds, combo)
+		}
+	}
+
+	return dedupStrings(pwds)
+}
+
+// extractDigits 从字符串中提取所有数字
+func extractDigits(s string) string {
+	var digits []byte
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			digits = append(digits, s[i])
+		}
+	}
+	return string(digits)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// ============================================================
 // 内部辅助函数
 // ============================================================
 
