@@ -475,7 +475,9 @@ def main():
     if not is_admin:
         print("  [!] 警告: 未以管理员身份运行！")
         print("  [!] 握手包捕获需要管理员权限（netsh trace）")
-        print("  [!] 请右键 → 以管理员身份运行")
+        print("  [!] 请右键EXE → 以管理员身份运行")
+        print()
+        input("  按回车键继续（功能可能受限）...")
         print()
 
     while True:
@@ -488,7 +490,7 @@ def main():
         print("  └─────────────────────────────┘")
         choice = input("\n  请选择: ").strip()
 
-        if choice == '0':
+        if choice == '0' or choice.lower() == 'q':
             print("\n  再见!")
             break
 
@@ -673,7 +675,17 @@ def show_captured_files():
             print(f"  {h}")
 
 # ============================================================================
-# 入口
+# 入口（防闪退：全局异常捕获 + 退出前等待按键）
 # ============================================================================
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('\n\n  已中断')
+    except Exception as e:
+        print(f'\n  [!] 程序异常: {e}')
+        import traceback
+        traceback.print_exc()
+    finally:
+        print()
+        input('  按回车键退出...')
