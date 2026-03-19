@@ -31,6 +31,37 @@ Phase 5（兜底）    在线字典爆破（断网，逐个密码尝试连接）
                      └─ 5b: 完整字典（最多1万条）
 ```
 
+## 快速开始（Windows）
+
+### 第1步：安装Python依赖
+
+```bash
+cd wifi-crack-windows
+pip install -r requirements.txt
+```
+
+### 第2步：下载hashcat（首次使用）
+
+1. 从 https://hashcat.net/hashcat/ 下载 hashcat-6.2.6（或最新版）
+2. 解压到 `wifi-crack-windows/hashcat-6.2.6/` 目录
+3. 确保 `hashcat-6.2.6/hashcat.exe` 存在
+
+### 第3步：下载wpa-sec字典（可选，提高命中率）
+
+```bash
+# PowerShell下载
+Invoke-WebRequest -Uri "https://wpa-sec.stanev.org/dict/cracked.txt.gz" -OutFile cracked.txt.gz
+# 用7-Zip解压为 wpa-sec-cracked.txt 放到项目目录
+```
+
+### 第4步：运行
+
+```bash
+# 右键"以管理员身份运行"命令提示符（握手包捕获需要）
+# 或双击 WiFi破解工具.bat
+python wifi_crack.py
+```
+
 ## 使用方法
 
 ```bash
