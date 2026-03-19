@@ -1,5 +1,6 @@
 # Go编译产物
 wifi-crack
+wifi-crack-mac/wifi-crack
 *.exe
 *.test
 *.out
@@ -24,6 +25,8 @@ Thumbs.db
 
 # 捕获输出目录
 captures/
+wifi-crack-mac/captures/
+wifi-crack-windows/captures/
 
 # 大型字典文件（超过1MB）
 wifi_dict.txt
@@ -32,3 +35,9 @@ wifi-crack-windows/wpa-sec-cracked.txt
 
 # hashcat二进制（277MB太大，用户自行下载）
 wifi-crack-windows/hashcat-6.2.6/
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
