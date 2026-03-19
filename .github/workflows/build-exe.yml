@@ -29,9 +29,10 @@ jobs:
           pyinstaller --onefile --console --name "WiFi-Handshake-Capture" capture.py
 
       - name: Verify EXE
+        shell: cmd
         run: |
-          dir wifi-handshake-capture\dist\
-          wifi-handshake-capture\dist\WiFi-Handshake-Capture.exe --help 2>nul || echo "EXE built (interactive mode, no --help)"
+          dir wifi-handshake-capture\dist\WiFi-Handshake-Capture.exe
+          echo EXE built successfully
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
