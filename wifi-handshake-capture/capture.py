@@ -445,7 +445,10 @@ def capture_netsh(ssid: str, bssid: str) -> CaptureResult:
 # 解析ETL文件提取PMKID或握手包
 # ============================================================================
 def parse_etl(etl_file: str, ssid: str, bssid: str) -> CaptureResult:
-    """从ETL文件中提取PMKID或EAPoL握手包（宽松搜索模式）"""
+    """
+    结构化解析ETL：先定位EAPoL帧（0x888e），验证帧结构后提取PMKID/握手包
+    不再盲搜PMKID标记，而是从合法EAPoL M1帧的Key Data中提取
+    """
     try:
         with open(etl_file, 'rb') as f:
             data = f.read()
@@ -457,96 +460,165 @@ def parse_etl(etl_file: str, ssid: str, bssid: str) -> CaptureResult:
 
         print(f"    解析ETL: {len(data):,} bytes, BSSID={mac_ap}, CLIENT={mac_cl}")
 
-        # ── 尝试1: 搜索所有PMKID标记（不绑定BSSID位置） ──
-        pmkid_tag = bytes([0xdd, 0x14, 0x00, 0x0f, 0xac, 0x04])
-        pmkid_positions = []
-        search_pos = 0
-        while True:
-            idx = data.find(pmkid_tag, search_pos)
-            if idx == -1:
-                break
-            pmkid_positions.append(idx)
-            search_pos = idx + 1
+        # ============================================================
+        # 第1步：定位所有EAPoL帧（以太网类型0x888e）
+        # EAPoL帧结构（从0x888e之后）：
+        #   ver(1) + type(1) + body_len(2) + descriptor_type(1) + key_info(2)
+        #   + key_len(2) + replay_counter(8) + nonce(32) + iv(16)
+        #   + rsc(8) + reserved(8) + mic(16) + data_len(2) + key_data(variable)
+        # ============================================================
+        EAPOL_ETHER = b'\x88\x8e'
+        # PMKID RSN IE标记
+        PMKID_TAG = bytes([0xdd, 0x14, 0x00, 0x0f, 0xac, 0x04])
 
-        print(f"    PMKID标记找到: {len(pmkid_positions)} 处")
-
-        for idx in pmkid_positions:
-            pmkid = data[idx + 6: idx + 6 + 16]
-            if len(pmkid) == 16 and pmkid.hex() != '0' * 32:
-                # 检查附近是否有BSSID（扩大搜索范围到前后256字节）
-                nearby = data[max(0, idx - 256):idx + 256]
-                has_bssid = (not bssid_bytes) or (bssid_bytes in nearby)
-                if has_bssid:
-                    hashline = f"WPA*01*{pmkid.hex()}*{mac_ap}*{mac_cl}*{essid_hex}***"
-                    hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_pmkid.22000")
-                    with open(hash_file, 'w') as f:
-                        f.write(hashline + '\n')
-                    print(f"    [+] PMKID找到! 偏移={idx}")
-                    return CaptureResult(
-                        success=True, hashline=hashline,
-                        hash_file=hash_file, method="PMKID (netsh trace)"
-                    )
-
-        # ── 尝试2: 搜索EAPoL帧（宽松模式，不严格绑定BSSID） ──
-        eapol_marker = b'\x88\x8e'
-        m1_frames = []
-        m2_frames = []
-        eapol_count = 0
+        m1_frames = []  # M1: ACK=1, MIC=0, 包含ANonce和可能的PMKID
+        m2_frames = []  # M2: ACK=0, MIC=1, 包含SNonce
+        pmkid_from_m1 = None  # 从M1 Key Data中结构化提取的PMKID
+        stats = {'eapol_found': 0, 'eapol_key': 0, 'valid_m1': 0, 'valid_m2': 0}
 
         pos = 0
-        while True:
-            pos = data.find(eapol_marker, pos)
+        while pos < len(data) - 20:
+            pos = data.find(EAPOL_ETHER, pos)
             if pos == -1:
                 break
-            # 宽松匹配：不强制要求BSSID在附近（ETL格式不保证位置）
-            if pos + 10 < len(data):
-                # EAPoL帧: 跳过0x888e(2bytes) → ver(1)+type(1)+len(2)
-                eapol_type = data[pos + 3]
-                if eapol_type == 0x03:  # EAPoL-Key
-                    eapol_count += 1
-                    key_len = (data[pos + 4] << 8) | data[pos + 5]
-                    eapol_start = pos + 2
-                    eapol_end = eapol_start + 4 + key_len
-                    if 50 < key_len < 1000 and eapol_end <= len(data):
-                        fd = data[eapol_start:eapol_end]
-                        if len(fd) > 49:
-                            ki = (fd[5] << 8) | fd[6]
-                            has_ack = bool(ki & 0x0080)
-                            has_mic = bool(ki & 0x0100)
-                            if has_ack and not has_mic:
-                                m1_frames.append({'anonce': fd[17:49], 'raw': fd, 'pos': pos})
-                            elif has_mic and not has_ack:
-                                m2_frames.append({'raw': fd, 'pos': pos})
+
+            stats['eapol_found'] += 1
+
+            # 验证EAPoL帧头结构（0x888e后的字节）
+            # 偏移+2: EAPoL版本(1字节, 应为0x01或0x02)
+            # 偏移+3: EAPoL类型(1字节, 0x03=Key)
+            # 偏移+4-5: body长度(2字节, 大端)
+            eapol_ver = data[pos + 2] if pos + 2 < len(data) else 0
+            eapol_type = data[pos + 3] if pos + 3 < len(data) else 0
+            if eapol_ver not in (0x01, 0x02, 0x03) or eapol_type != 0x03:
+                pos += 2
+                continue
+
+            body_len = (data[pos + 4] << 8 | data[pos + 5]) if pos + 5 < len(data) else 0
+            if body_len < 95 or body_len > 1500:
+                pos += 2
+                continue
+
+            stats['eapol_key'] += 1
+
+            # EAPoL-Key帧体（从ver字节开始算）
+            frame_start = pos + 2  # 跳过0x888e
+            frame_end = frame_start + 4 + body_len
+            if frame_end > len(data):
+                pos += 2
+                continue
+            frame = data[frame_start:frame_end]
+
+            # 解析Key Info（帧体偏移5-6）
+            # Key Info位定义（802.11i）：
+            #   bit3: Pairwise  bit6: Install  bit7: ACK  bit8: MIC
+            #   bit12: Encrypted Key Data
+            if len(frame) < 99:
+                pos += 2
+                continue
+            key_info = (frame[5] << 8) | frame[6]
+            is_pairwise = bool(key_info & 0x0008)
+            has_ack = bool(key_info & 0x0080)
+            has_mic = bool(key_info & 0x0100)
+            has_enc = bool(key_info & 0x1000)
+
+            if not is_pairwise:
+                pos += 2
+                continue
+
+            # ANonce在帧体偏移17-48（32字节）
+            anonce = frame[17:49]
+            # MIC在帧体偏移81-96（16字节）
+            mic = frame[81:97]
+            # Key Data Length在帧体偏移97-98
+            kd_len = (frame[97] << 8) | frame[98] if len(frame) > 98 else 0
+            # Key Data从帧体偏移99开始
+            key_data = frame[99:99 + kd_len] if len(frame) >= 99 + kd_len else b''
+
+            if has_ack and not has_mic:
+                # ── M1帧（AP → STA）──
+                # 验证：ANonce不能全零
+                if anonce == b'\x00' * 32:
+                    pos += 2
+                    continue
+                stats['valid_m1'] += 1
+                m1_frames.append({
+                    'anonce': anonce, 'raw': frame, 'pos': pos,
+                    'key_data': key_data, 'kd_len': kd_len
+                })
+
+                # 从M1的Key Data中结构化查找PMKID
+                if kd_len >= 22 and not pmkid_from_m1:
+                    kd_pos = 0
+                    while kd_pos < len(key_data) - 22:
+                        # RSN IE: tag(1) + len(1) + OUI(3) + type(1) + data
+                        ie_tag = key_data[kd_pos]
+                        ie_len = key_data[kd_pos + 1] if kd_pos + 1 < len(key_data) else 0
+                        if ie_tag == 0xdd and ie_len == 0x14:
+                            # 验证OUI: 00:0f:ac, Type: 04 (PMKID)
+                            if (kd_pos + 6 <= len(key_data) and
+                                key_data[kd_pos+2:kd_pos+5] == b'\x00\x0f\xac' and
+                                key_data[kd_pos+5] == 0x04):
+                                pmkid_val = key_data[kd_pos+6:kd_pos+22]
+                                if len(pmkid_val) == 16 and pmkid_val != b'\x00'*16 and pmkid_val != b'\xff'*16:
+                                    pmkid_from_m1 = pmkid_val.hex()
+                                    print(f"    [+] 从M1 Key Data中提取PMKID (结构化验证)")
+                            break
+                        kd_pos += 2 + ie_len if ie_len > 0 else kd_pos + 1
+
+            elif has_mic and not has_ack and not has_enc:
+                # ── M2帧（STA → AP）──
+                # 验证：MIC不能全零
+                if mic == b'\x00' * 16:
+                    pos += 2
+                    continue
+                stats['valid_m2'] += 1
+                m2_frames.append({'raw': frame, 'pos': pos, 'mic': mic})
+
             pos += 2
 
-        print(f"    EAPoL-Key帧: {eapol_count} 个 (M1={len(m1_frames)}, M2={len(m2_frames)})")
+        print(f"    EAPoL统计: 找到={stats['eapol_found']}, Key={stats['eapol_key']}, "
+              f"M1={stats['valid_m1']}, M2={stats['valid_m2']}")
 
+        # ── 优先使用PMKID（从M1 Key Data结构化提取） ──
+        if pmkid_from_m1:
+            hashline = f"WPA*01*{pmkid_from_m1}*{mac_ap}*{mac_cl}*{essid_hex}***"
+            hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_pmkid.22000")
+            with open(hash_file, 'w') as f:
+                f.write(hashline + '\n')
+            print(f"    [+] PMKID (结构化提取, 来自EAPoL M1 Key Data)")
+            return CaptureResult(
+                success=True, hashline=hashline,
+                hash_file=hash_file, method="PMKID (结构化EAPoL M1)"
+            )
+
+        # ── 其次使用EAPoL M1+M2握手包 ──
         if m1_frames and m2_frames:
             m1 = m1_frames[0]
             m2 = m2_frames[0]
             anonce_hex = m1['anonce'].hex()
-            mic_hex = m2['raw'][81:97].hex() if len(m2['raw']) > 96 else '0' * 32
+            mic_hex = m2['mic'].hex()
+            # MIC清零版M2帧（hashcat需要）
             m2_zeroed = bytearray(m2['raw'])
-            if len(m2_zeroed) > 96:
-                m2_zeroed[81:97] = b'\x00' * 16
+            m2_zeroed[81:97] = b'\x00' * 16
             hashline = (f"WPA*02*{mic_hex}*{mac_ap}*{mac_cl}*"
                        f"{essid_hex}*{anonce_hex}*{m2_zeroed.hex()}*00")
             hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_handshake.22000")
             with open(hash_file, 'w') as f:
                 f.write(hashline + '\n')
-            print(f"    [+] 握手包找到! M1偏移={m1['pos']}, M2偏移={m2['pos']}")
+            print(f"    [+] EAPoL握手包 (M1@{m1['pos']}, M2@{m2['pos']})")
             return CaptureResult(
                 success=True, hashline=hashline,
-                hash_file=hash_file, method="EAPoL握手包 (netsh trace)"
+                hash_file=hash_file, method="EAPoL M1+M2 (结构化解析)"
             )
 
-        # 搜索0x888e标记总数（调试用）
-        total_888e = data.count(eapol_marker)
         return CaptureResult(
-            error=f"ETL中0x888e标记={total_888e}, EAPoL-Key={eapol_count}, M1={len(m1_frames)}, M2={len(m2_frames)}"
+            error=f"未找到有效握手数据 (EAPoL={stats['eapol_found']}, Key={stats['eapol_key']}, M1={stats['valid_m1']}, M2={stats['valid_m2']})"
         )
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return CaptureResult(error=f"ETL解析失败: {e}")
 
 # ============================================================================
