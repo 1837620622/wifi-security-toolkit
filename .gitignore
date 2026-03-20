@@ -41,3 +41,8 @@ __pycache__/
 *.pyc
 *.pyo
 .ipynb_checkpoints/
+
+# 字典目录（运行时自动下载/生成）
+dicts/
+wifi-crack-mac/dicts/
+wifi-crack-cloud/dicts/
