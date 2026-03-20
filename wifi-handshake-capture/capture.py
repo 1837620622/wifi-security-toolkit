@@ -20,9 +20,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 # ============================================================================
-# 脚本所在目录为工作目录
-# ============================================================================
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# 工作目录：PyInstaller打包后EXE在临时目录解压，用sys.executable获取EXE真实位置
+SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CAPTURE_DIR = os.path.join(SCRIPT_DIR, "captures")
 os.makedirs(CAPTURE_DIR, exist_ok=True)
 
@@ -102,10 +101,10 @@ def scan_wifi() -> List[WiFiNetwork]:
         return []
 
     # 主动触发WiFi扫描刷新（不是disconnect，不会断网）
-    print("  触发WiFi扫描...")
+    print("  触发WiFi扫描（等待8秒让驱动刷新）...")
     subprocess.run(['cmd', '/c', 'netsh', 'wlan', 'show', 'networks'], 
                   capture_output=True, timeout=5)
-    time.sleep(4)  # 等待驱动刷新扫描列表
+    time.sleep(8)  # 等动更长时间让驱动扫描到更多网络
 
     output = ''
     for attempt in range(3):
