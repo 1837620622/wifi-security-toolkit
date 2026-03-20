@@ -101,13 +101,19 @@ def scan_wifi() -> List[WiFiNetwork]:
         print("  [!] 请检查: 设备管理器 → 网络适配器 → 是否有WiFi网卡")
         return []
 
+    # 主动触发WiFi扫描刷新（不是disconnect，不会断网）
+    print("  触发WiFi扫描...")
+    subprocess.run(['cmd', '/c', 'netsh', 'wlan', 'show', 'networks'], 
+                  capture_output=True, timeout=5)
+    time.sleep(4)  # 等待驱动刷新扫描列表
+
     output = ''
     for attempt in range(3):
         output = _run_cmd(['netsh', 'wlan', 'show', 'networks', 'mode=bssid'])
         if output and _MAC_RE.search(output):
             break
         if attempt < 2:
-            w = 3 * (attempt + 1)
+            w = 4 * (attempt + 1)
             print(f"  等待扫描刷新({w}秒)...")
             time.sleep(w)
 
