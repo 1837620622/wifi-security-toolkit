@@ -50,179 +50,187 @@ class CaptureResult:
 
 # ============================================================================
 # WiFi扫描（纯netsh，不依赖第三方库）
+# 修复：编码用系统默认(GBK) / signal缺失不丢弃 / 兼容中英文+隐藏SSID
 # ============================================================================
-def scan_wifi() -> List[WiFiNetwork]:
-    """用netsh扫描附近WiFi网络"""
+def _run_netsh(args: list) -> str:
+    """运行netsh命令，自动处理编码（GBK优先，UTF-8兜底）"""
     try:
-        # 不再断开WiFi（disconnect会导致部分网卡扫描失败）
-        # 直接扫描，如果结果为空则等待后重试
-        print("    扫描WiFi网络...")
-        
-        networks = []
-        for attempt in range(3):  # 最多重试3次
-            result = subprocess.run(
-                ['netsh', 'wlan', 'show', 'networks', 'mode=bssid'],
-                capture_output=True, text=True, timeout=15,
-                encoding='utf-8', errors='replace'
-            )
-            if result.returncode != 0:
-                print(f"    netsh返回错误(code={result.returncode})")
-                if result.stderr:
-                    print(f"    {result.stderr.strip()[:200]}")
-                return []
-            
-            # 检查是否有内容
-            if 'SSID' in result.stdout and 'BSSID' in result.stdout:
-                break  # 有结果，继续解析
-            
-            # 没结果，等待后重试
-            if attempt < 2:
-                wait = 3 * (attempt + 1)
-                print(f"    未扫描到网络，等待{wait}秒后重试({attempt+1}/3)...")
-                time.sleep(wait)
+        # Windows中文系统netsh输出是GBK/CP936，不是UTF-8
+        r = subprocess.run(
+            ['netsh'] + args,
+            capture_output=True, timeout=15
+        )
+        # 先尝试GBK解码（中文Windows默认）
+        for enc in ['gbk', 'cp936', 'utf-8', 'latin-1']:
+            try:
+                return r.stdout.decode(enc)
+            except (UnicodeDecodeError, AttributeError):
+                continue
+        return r.stdout.decode('utf-8', errors='replace')
+    except Exception:
+        return ''
 
+def scan_wifi() -> List[WiFiNetwork]:
+    """用netsh扫描附近WiFi网络（兼容中英文系统+各种驱动差异）"""
+    import re as _re
+    try:
+        print("    扫描WiFi网络...")
+
+        # MAC地址正则（匹配 aa:bb:cc:dd:ee:ff 或 aa-bb-cc-dd-ee-ff）
+        mac_re = _re.compile(r'[0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}')
+
+        output = ''
+        for attempt in range(3):
+            output = _run_netsh(['wlan', 'show', 'networks', 'mode=bssid'])
+            if not output:
+                print(f"    netsh无输出，等待{3*(attempt+1)}秒重试({attempt+1}/3)...")
+                time.sleep(3 * (attempt + 1))
+                continue
+            # 检查是否有有效内容（BSSID行包含MAC地址）
+            if mac_re.search(output):
+                break
+            if attempt < 2:
+                print(f"    未扫描到网络，等待{3*(attempt+1)}秒重试({attempt+1}/3)...")
+                time.sleep(3 * (attempt + 1))
+
+        if not output:
+            print("    [!] netsh无输出（网卡可能被禁用）")
+            return []
+
+        # ── 解析netsh输出 ──
+        # 关键字兼容：中文/英文/繁体
         networks = []
+        current_ssid = ''
         current = {}
 
-        for line in result.stdout.split('\n'):
+        for line in output.split('\n'):
             line = line.strip()
             if not line:
                 continue
 
-            # SSID行
-            if line.startswith('SSID') and 'BSSID' not in line:
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    ssid = parts[1].strip()
-                    if ssid:
-                        current = {'ssid': ssid}
+            # 提取冒号后的值（兼容全角冒号）
+            val = ''
+            if ':' in line:
+                val = line.split(':', 1)[1].strip()
+            elif '：' in line:
+                val = line.split('：', 1)[1].strip()
 
-            # BSSID行
-            elif 'BSSID' in line:
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    current['bssid'] = parts[1].strip()
+            line_lower = line.lower()
 
-            # 安全类型
-            elif '身份验证' in line or 'Authentication' in line.lower():
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    current['security'] = parts[1].strip()
+            # ── SSID行（新条目开始） ──
+            # 匹配: "SSID 1 : xxx" / "SSID 2 : xxx" / "SSID            : xxx"
+            # 不匹配: "BSSID 1 : xx:xx:xx"
+            if _re.match(r'^\s*SSID\s+\d*\s*[:：]', line, _re.IGNORECASE) and 'BSSID' not in line.upper():
+                current_ssid = val
+                # 允许空SSID（隐藏网络）
+                current = {'ssid': current_ssid if current_ssid else '<Hidden>'}
 
-            # 信号强度
-            elif ('信号' in line or 'Signal' in line) and '%' in line:
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    try:
-                        current['signal'] = int(parts[1].strip().replace('%', ''))
-                    except:
-                        pass
+            # ── BSSID行 ──
+            elif 'BSSID' in line.upper():
+                m = mac_re.search(line)
+                if m and 'ssid' in current:
+                    current['bssid'] = m.group(0)
 
-            # 频道
-            elif ('频道' in line or 'Channel' in line) and 'GHz' not in line:
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    try:
-                        current['channel'] = int(parts[1].strip())
-                    except:
-                        pass
+            # ── 安全/身份验证 ──
+            elif any(kw in line for kw in ['身份验证', '驗證', 'Authentication']):
+                if val:
+                    current['security'] = val
 
-            # 波段
-            elif '波段' in line or 'Band' in line:
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    current['band'] = parts[1].strip()
+            # ── 加密 ──
+            elif any(kw in line for kw in ['加密', '密碼', 'Encryption', 'Cipher']):
+                if val:
+                    current['encryption'] = val
 
-            # 收集完一个BSSID条目
-            if 'ssid' in current and 'bssid' in current and current.get('signal'):
+            # ── 信号强度 ──
+            elif any(kw in line for kw in ['信号', '訊號', 'Signal']) and '%' in line:
+                try:
+                    current['signal'] = int(_re.search(r'(\d+)\s*%', line).group(1))
+                except:
+                    pass
+
+            # ── 频道 ──
+            elif any(kw in line for kw in ['频道', '頻道', 'Channel']) and 'GHz' not in line:
+                try:
+                    current['channel'] = int(_re.search(r'(\d+)', val).group(1))
+                except:
+                    pass
+
+            # ── 波段/频率 ──
+            elif any(kw in line for kw in ['波段', 'Band', '頻帶']):
+                if val:
+                    current['band'] = val
+
+            # ── 收集条目：有SSID+BSSID就保存（不强制要求signal） ──
+            if 'ssid' in current and 'bssid' in current:
                 networks.append(WiFiNetwork(
-                    ssid=current['ssid'],
+                    ssid=current.get('ssid', ''),
                     bssid=current.get('bssid', ''),
                     signal=current.get('signal', 0),
-                    security=current.get('security', ''),
+                    security=current.get('security', current.get('encryption', '')),
                     channel=current.get('channel', 0),
                     band=current.get('band', ''),
                 ))
+                # 保留ssid和security给同SSID下一个BSSID
                 ssid_bak = current.get('ssid', '')
                 sec_bak = current.get('security', '')
                 current = {'ssid': ssid_bak, 'security': sec_bak}
 
-        # 去重（保留信号最强的）
+        # 去重（保留信号最强的，signal=0排最后）
         best = {}
         for n in networks:
-            if n.ssid and (n.ssid not in best or n.signal > best[n.ssid].signal):
-                best[n.ssid] = n
-        return sorted(best.values(), key=lambda x: x.signal, reverse=True)
+            key = n.ssid or n.bssid  # 隐藏SSID用BSSID做key
+            if key and (key not in best or n.signal > best[key].signal):
+                best[key] = n
+        result = sorted(best.values(), key=lambda x: x.signal, reverse=True)
+
+        if not result:
+            print(f"    [!] 解析到0个网络（netsh输出{len(output)}字符）")
+            # 打印前几行帮助诊断
+            for i, line in enumerate(output.split('\n')[:10]):
+                print(f"    | {line.rstrip()}")
+
+        return result
 
     except Exception as e:
         print(f"  [!] 扫描失败: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 # ============================================================================
 # 获取本机WiFi MAC地址
 # ============================================================================
 def get_local_mac() -> str:
-    """获取本机WiFi网卡MAC地址（多种方式尝试）"""
+    """获取本机WiFi网卡MAC地址（多种方式+GBK编码兼容）"""
     import re as _re
-    mac_pattern = _re.compile(r'([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}')
-    
-    # 方式1: netsh wlan show interfaces
+    mac_re = _re.compile(r'[0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}')
+
+    # 方式1: netsh wlan show interfaces（用GBK解码）
+    out = _run_netsh(['wlan', 'show', 'interfaces'])
+    for line in out.split('\n'):
+        if any(kw in line for kw in ['物理地址', 'Physical address', 'physical address']):
+            m = mac_re.search(line)
+            if m:
+                return m.group(0).replace(':', '').replace('-', '').lower()
+
+    # 方式2: getmac
     try:
-        result = subprocess.run(
-            ['netsh', 'wlan', 'show', 'interfaces'],
-            capture_output=True, text=True, timeout=5,
-            encoding='utf-8', errors='replace'
-        )
-        for line in result.stdout.split('\n'):
-            # 匹配中英文关键字
-            if '物理地址' in line or 'physical address' in line.lower():
-                m = mac_pattern.search(line)
+        r = subprocess.run(['getmac', '/v', '/fo', 'list'], capture_output=True, timeout=5)
+        text = r.stdout.decode('gbk', errors='replace')
+        found = False
+        for line in text.split('\n'):
+            if any(kw in line.lower() for kw in ['wi-fi', 'wlan', 'wireless']):
+                found = True
+            if found:
+                m = mac_re.search(line)
                 if m:
                     return m.group(0).replace(':', '').replace('-', '').lower()
     except:
         pass
-    
-    # 方式2: getmac命令
-    try:
-        result = subprocess.run(
-            ['getmac', '/v', '/fo', 'list'],
-            capture_output=True, text=True, timeout=5,
-            encoding='utf-8', errors='replace'
-        )
-        # 查找WiFi相关的MAC
-        lines = result.stdout.split('\n')
-        found_wifi = False
-        for line in lines:
-            if 'wi-fi' in line.lower() or 'wlan' in line.lower() or 'wireless' in line.lower():
-                found_wifi = True
-            if found_wifi:
-                m = mac_pattern.search(line)
-                if m:
-                    return m.group(0).replace(':', '').replace('-', '').lower()
-    except:
-        pass
-    
-    # 方式3: ipconfig /all
-    try:
-        result = subprocess.run(
-            ['ipconfig', '/all'],
-            capture_output=True, text=True, timeout=5,
-            encoding='utf-8', errors='replace'
-        )
-        lines = result.stdout.split('\n')
-        found_wifi = False
-        for line in lines:
-            if 'wi-fi' in line.lower() or 'wlan' in line.lower() or 'wireless' in line.lower():
-                found_wifi = True
-            if found_wifi and ('物理地址' in line or 'physical address' in line.lower()):
-                m = mac_pattern.search(line)
-                if m:
-                    return m.group(0).replace(':', '').replace('-', '').lower()
-    except:
-        pass
-    
-    print("    [!] 无法获取WiFi MAC地址，请手动输入")
-    mac_input = input("    WiFi MAC地址 (如 aa:bb:cc:dd:ee:ff): ").strip()
+
+    # 方式3: 手动输入
+    print("    [!] 无法自动获取WiFi MAC地址")
+    mac_input = input("    请输入WiFi MAC地址 (如 aa:bb:cc:dd:ee:ff): ").strip()
     if mac_input:
         return mac_input.replace(':', '').replace('-', '').lower()
     return "000000000000"
@@ -272,26 +280,21 @@ def trigger_eapol(ssid: str, bssid: str):
             f.write(xml)
             xml_path = f.name
 
-        # 添加profile并连接
+        # 添加profile并连接（不解码输出，避免编码问题）
         subprocess.run(['netsh', 'wlan', 'add', 'profile', f'filename={xml_path}'],
-                      capture_output=True, text=True, timeout=5,
-                      encoding='utf-8', errors='replace')
-
+                      capture_output=True, timeout=5)
         subprocess.run(['netsh', 'wlan', 'connect', f'name={profile_name}'],
-                      capture_output=True, text=True, timeout=5,
-                      encoding='utf-8', errors='replace')
+                      capture_output=True, timeout=5)
 
         # 等待EAPOL交换
         time.sleep(4)
 
         # 断开并清理
         subprocess.run(['netsh', 'wlan', 'disconnect'],
-                      capture_output=True, text=True, timeout=5,
-                      encoding='utf-8', errors='replace')
+                      capture_output=True, timeout=5)
         time.sleep(1)
         subprocess.run(['netsh', 'wlan', 'delete', 'profile', f'name={profile_name}'],
-                      capture_output=True, text=True, timeout=5,
-                      encoding='utf-8', errors='replace')
+                      capture_output=True, timeout=5)
     except Exception as e:
         print(f"    [!] 触发EAPOL错误: {e}")
     finally:
@@ -309,8 +312,7 @@ def capture_netsh(ssid: str, bssid: str) -> CaptureResult:
     trace_file = os.path.join(CAPTURE_DIR, "wifi_trace.etl")
 
     print("    [1/5] 停止旧跟踪...")
-    subprocess.run(['netsh', 'trace', 'stop'], capture_output=True,
-                  text=True, timeout=30, encoding='utf-8', errors='replace')
+    subprocess.run(['netsh', 'trace', 'stop'], capture_output=True, timeout=30)
     time.sleep(2)
 
     # 清理旧文件
@@ -328,12 +330,12 @@ def capture_netsh(ssid: str, bssid: str) -> CaptureResult:
             ['netsh', 'trace', 'start', 'capture=yes',
              f'traceFile={trace_file}', 'maxSize=50', 'overwrite=yes',
              'report=disabled'],
-            capture_output=True, text=True, timeout=20,
-            encoding='utf-8', errors='replace'
+            capture_output=True, timeout=20
         )
         if result.returncode != 0:
-            err = result.stdout + result.stderr
-            if '需要提升' in err or 'elevation' in err.lower() or '拒绝访问' in err:
+            # 用GBK解码错误信息
+            err = result.stdout.decode('gbk', errors='replace') + result.stderr.decode('gbk', errors='replace')
+            if any(kw in err for kw in ['需要提升', 'elevation', '拒绝访问', 'denied', 'Elevation']):
                 return CaptureResult(error="需要管理员权限！请右键 → 以管理员身份运行")
             return CaptureResult(error=f"启动跟踪失败: {err[:200]}")
         print("    [OK] 网络跟踪已启动")
@@ -352,8 +354,7 @@ def capture_netsh(ssid: str, bssid: str) -> CaptureResult:
 
     # 停止跟踪
     print("    [5/5] 停止跟踪并解析...")
-    subprocess.run(['netsh', 'trace', 'stop'], capture_output=True,
-                  text=True, timeout=60, encoding='utf-8', errors='replace')
+    subprocess.run(['netsh', 'trace', 'stop'], capture_output=True, timeout=60)
     time.sleep(2)
 
     if not os.path.exists(trace_file):
