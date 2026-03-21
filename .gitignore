@@ -46,3 +46,6 @@ __pycache__/
 dicts/
 wifi-crack-mac/dicts/
 wifi-crack-cloud/dicts/
+
+# 针对性密码本（运行脚本自动生成，不上传）
+针对性密码本/dict_*.txt

