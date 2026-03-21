@@ -20,6 +20,9 @@
 
 set -uo pipefail
 
+# 确保homebrew路径在PATH中
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/抓包结果_$(date +%Y%m%d_%H%M%S)"
 

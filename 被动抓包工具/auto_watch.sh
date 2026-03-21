@@ -20,6 +20,9 @@
 # 作者：传康Kk (微信:1837620622)
 # ============================================================
 
+# 确保homebrew路径在PATH中（bash运行时可能缺失）
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SAVE_DIR="${SCRIPT_DIR}/抓包结果"
 WATCH_DIR="/var/tmp"
