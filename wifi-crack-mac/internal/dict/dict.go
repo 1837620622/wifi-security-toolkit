@@ -269,23 +269,31 @@ func GenerateISPDefaults() []string {
 }
 
 // ============================================================
-// GenerateAllChinese 合并所有中国定制密码
-// 按优先级排列，高命中率优先
-// 同时自动加载本地 wifi_dict.txt（如果存在）
+// GenerateCoreChinese 核心中国定制密码（仅内置生成，不含外部大字典）
+// 用于 Phase 5a 在线爆破层，约10万条，预计30分钟内完成
 // ============================================================
-func GenerateAllChinese() []string {
+func GenerateCoreChinese() []string {
 	var all []string
-	// 按命中率排序：高频静态 → 运营商默认 → 生日 → 手机号 → 重复模式 → 外部字典
+	// 按命中率排序：高频静态 → 运营商默认 → 生日 → 手机号 → 重复模式 → wpa-sec高频
 	all = append(all, TopPasswords...)
 	all = append(all, GenerateISPDefaults()...)
 	all = append(all, GenerateBirthdayPasswords()...)
 	all = append(all, GeneratePhonePasswords()...)
 	all = append(all, GenerateRepeatPatterns()...)
-	// 追加wpa-sec全球已破解密码字典（取前5000条高频）
+	// 追加wpa-sec全球已破解密码字典（取前2万条高频，真实破解数据命中率高）
 	if wpaSec := loadWPASecDict(); len(wpaSec) > 0 {
 		all = append(all, wpaSec...)
 	}
-	// 追加本地字典
+	return MergeAndDedup(all)
+}
+
+// ============================================================
+// GenerateAllChinese 合并所有中国定制密码（含外部大字典）
+// 用于 hashcat GPU 离线破解和 Phase 5b 兜底
+// ============================================================
+func GenerateAllChinese() []string {
+	all := GenerateCoreChinese()
+	// 追加本地 wifi_dict.txt 大字典（仅用于GPU离线破解或兜底层）
 	if local := LoadLocalDict(); len(local) > 0 {
 		all = append(all, local...)
 	}
@@ -293,26 +301,27 @@ func GenerateAllChinese() []string {
 }
 
 // ============================================================
-// GenerateAllForTarget 针对特定目标生成完整密码列表
-// 比GenerateAllChinese多了BSSID相关密码（MAC后缀）
+// GenerateAllForTarget 针对特定目标生成在线爆破密码列表
+// 只含核心内置密码 + MAC后缀，不含 wifi_dict.txt 大字典
+// 用于 Phase 5a 在线爆破，控制在10万条以内
 // ============================================================
 func GenerateAllForTarget(ssid, bssid string) []string {
 	var all []string
 	// MAC地址后缀密码（排最前，因为很多路由器默认就是这个）
 	all = append(all, GenerateRouterMAC(bssid)...)
-	// 通用中国字典
-	all = append(all, GenerateAllChinese()...)
+	// 核心中国字典（不含外部大字典，约10万条）
+	all = append(all, GenerateCoreChinese()...)
 	return MergeAndDedup(all)
 }
 
 // ============================================================
 // loadWPASecDict 加载wpa-sec全球已破解密码字典
 // 文件名: wpa-sec-cracked.txt（来源: wpa-sec.stanev.org）
-// 只取前5000条高频密码（完整75万条用于在线爆破不现实）
+// 取前2万条高频密码（完整75万条用于在线爆破不现实，2万条已覆盖绝大部分真实WiFi密码）
 // ============================================================
 func loadWPASecDict() []string {
 	const dictName = "wpa-sec-cracked.txt"
-	const maxLines = 5000
+	const maxLines = 20000
 
 	// 候选路径
 	candidates := []string{}
