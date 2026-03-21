@@ -716,8 +716,6 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		}
 
 		// ── Phase 5: CoreWLAN在线字典爆破（分层策略） ──
-		// macOS上Phase 3-4不稳定，Phase 5是主力攻击方式
-		// 分层：先高频密码（快速命中弱密码），再完整字典（兜底）
 		if gpuDone {
 			fmt.Println("  [Phase 5] 跳过（GPU已完成字典+暴力均未命中）")
 		} else {
@@ -727,8 +725,8 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 				topSet[p] = true
 			}
 
-			// 第1层：中国定制高频密码（约5000条，50ms间隔 ≈ 4分钟）
-			chinaPwds := dict.GenerateAllChinese()
+			// 使用优化后的字典（含MAC后缀+运营商默认+全覆盖生日+手机号）
+			chinaPwds := dict.GenerateAllForTarget(t.SSID, t.BSSID)
 			var layer1 []string
 			for _, p := range chinaPwds {
 				if !topSet[p] {
@@ -750,9 +748,8 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 				continue
 			}
 
-			// 第2层：完整大字典（如果有wifi_dict.txt）
+			// 第2层：完整大字典
 			allPwds := allPasswordsForTargets([]scanner.WiFiNetwork{t}, dictFile)
-			// 排除已尝试的
 			triedSet := make(map[string]bool)
 			for _, p := range topPasswords {
 				triedSet[p] = true
@@ -768,10 +765,9 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 			}
 
 			if len(layer2) > 0 {
-				// 限制大字典最多5万条（200万条约111小时不现实）
 				maxLayer2 := 50000
 				if len(layer2) > maxLayer2 {
-					fmt.Printf("  [Phase 5b] 字典爆破（取前%d条，原%d条太多跳过）...\n", maxLayer2, len(layer2))
+					fmt.Printf("  [Phase 5b] 字典爆破（取前%d条，原%d条太多）...\n", maxLayer2, len(layer2))
 					layer2 = layer2[:maxLayer2]
 				} else {
 					fmt.Printf("  [Phase 5b] 字典爆破（%d条）...\n", len(layer2))
