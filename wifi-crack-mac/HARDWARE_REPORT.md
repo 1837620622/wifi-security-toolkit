@@ -47,9 +47,21 @@
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | airport命令行 | 已移除 | macOS 26.3删除了airport工具 |
-| 监控模式(CLI) | **不可用** | tcpdump -I 可声明监控模式(link-type=802.11_RADIO)，但驱动不交付任何帧，实测10秒抓0个包 |
+| 监控模式(CLI) | **不可用** | tcpdump -I 声明link-type=802.11_RADIO但驱动不交付帧，实测10秒0包 |
+| 监控模式(GUI) | **可用** | Wireless Diagnostics → Sniffer 可抓真实802.11帧(实测3分钟16177帧含beacon/probe/data) |
 | 数据包注入 | 不可用 | 内置网卡不支持原生注入 |
 | SIP保护 | 已启用 | 限制了底层网卡操作 |
+
+### 监控模式实测结论（2026-03-22）
+
+| 路径 | 结果 | 说明 |
+| --- | --- | --- |
+| tcpdump -I (CLI) | ❌ 0包 | link-type正确但驱动不向libpcap交付帧 |
+| Wireless Diagnostics Sniffer (GUI) | ✅ 16177帧/3分钟 | beacon/probe/data帧完整，802.11_RADIO格式 |
+| EAPOL握手帧 | 0帧 | 凌晨1点无客户端重连，非抓包能力问题 |
+| hcxpcapngtool转换 | 无哈希输出 | 缺少EAPOL/authentication/association帧 |
+
+结论：**GUI路径可抓真实802.11帧，CLI路径不可用。** 抓握手包需要在高峰时段(18-23点)用GUI Sniffer长时间守候，或买USB WiFi适配器主动deauth。
 
 ## 四、hashcat GPU性能评估
 
