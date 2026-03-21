@@ -77,33 +77,32 @@ var TopPasswords = []string{
 
 // ============================================================
 // GenerateBirthdayPasswords 生成生日格式密码
-// 覆盖：19700101-20101231 中常见月日组合
+// 全覆盖：1960-2010年 × 1-12月 × 1-31日
+// 格式：YYYYMMDD / MMDDYYYY / DDMMYYYY
 // ============================================================
 func GenerateBirthdayPasswords() []string {
 	var passwords []string
+	daysInMonth := [13]int{0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
 
-	// 常见月日（高频日期优先）
-	hotDates := []string{
-		"0101", "0214", "0314", "0401", "0404", "0501", "0520",
-		"0601", "0606", "0701", "0707", "0801", "0815", "0910",
-		"1001", "1010", "1111", "1212", "1224", "1225", "1231",
-	}
-
-	// 年份范围：1970-2010（WiFi设置者的生日年份范围）
-	for year := 1970; year <= 2010; year++ {
-		ys := fmt.Sprintf("%d", year)
-		for _, md := range hotDates {
-			passwords = append(passwords, ys+md) // 19900520
+	for year := 1960; year <= 2010; year++ {
+		ys := fmt.Sprintf("%04d", year)
+		yy := fmt.Sprintf("%02d", year%100)
+		for month := 1; month <= 12; month++ {
+			ms := fmt.Sprintf("%02d", month)
+			for day := 1; day <= daysInMonth[month]; day++ {
+				ds := fmt.Sprintf("%02d", day)
+				// YYYYMMDD（最常见：19900520）
+				passwords = append(passwords, ys+ms+ds)
+				// MMDDYYYY（05201990）
+				passwords = append(passwords, ms+ds+ys)
+				// DDMMYYYY（20051990）
+				passwords = append(passwords, ds+ms+ys)
+				// YYMMDD + 两位后缀（9005200x）
+				passwords = append(passwords, yy+ms+ds+"00")
+				passwords = append(passwords, yy+ms+ds+"01")
+			}
 		}
 	}
-
-	// 月日+年份 反向格式（如 05201990）
-	for _, md := range hotDates {
-		for _, year := range []int{1985, 1990, 1995, 2000, 2005} {
-			passwords = append(passwords, md+fmt.Sprintf("%d", year))
-		}
-	}
-
 	return passwords
 }
 
@@ -114,38 +113,51 @@ func GenerateBirthdayPasswords() []string {
 func GeneratePhonePasswords() []string {
 	var passwords []string
 
-	// 中国手机号段前3位
+	// 中国手机号段前3位（2026年最新号段）
 	prefixes := []string{
 		"130", "131", "132", "133", "134", "135", "136", "137",
-		"138", "139", "150", "151", "152", "153", "155", "156",
-		"157", "158", "159", "166", "170", "171", "172", "175",
-		"176", "177", "178", "180", "181", "182", "183", "184",
-		"185", "186", "187", "188", "189", "191", "193", "195",
-		"196", "197", "198", "199",
+		"138", "139", "147", "148", "149",
+		"150", "151", "152", "153", "155", "156", "157", "158", "159",
+		"162", "165", "166", "167",
+		"170", "171", "172", "173", "175", "176", "177", "178",
+		"180", "181", "182", "183", "184", "185", "186", "187", "188", "189",
+		"190", "191", "192", "193", "195", "196", "197", "198", "199",
 	}
 
-	// 高频尾号模式（后8位 = 手机号去掉前3位）
+	// 高频尾号（后8位 = 手机号去掉前3位）
 	hotTails := []string{
 		"00000000", "11111111", "22222222", "33333333",
 		"44444444", "55555555", "66666666", "77777777",
 		"88888888", "99999999", "12345678", "87654321",
+		"11223344", "12341234", "00001234", "88886666",
+		"66668888", "13141314", "52015201", "00008888",
 	}
 	passwords = append(passwords, hotTails...)
 
-	// 前缀+常见4位尾号 → 截取后8位作为密码
-	commonEnds := []string{"0000", "1111", "1234", "5678", "6666", "8888", "9999", "6789"}
+	// 完整11位手机号（运营商装机默认密码常为手机号）
+	// 前缀 + 高频中间4位 + 高频尾4位
+	midParts := []string{"0000", "1111", "1234", "5678", "8888", "6666", "9999"}
+	endParts := []string{"0000", "1111", "1234", "5678", "6666", "8888", "9999", "6789"}
 	for _, pf := range prefixes {
-		for _, end := range commonEnds {
-			phone := pf + "0000" + end // 模拟11位手机号
-			// 取后8位
-			if len(phone) >= 8 {
-				passwords = append(passwords, phone[len(phone)-8:])
+		for _, mid := range midParts {
+			for _, end := range endParts {
+				phone := pf + mid + end
+				if len(phone) == 11 {
+					passwords = append(passwords, phone)       // 完整11位
+					passwords = append(passwords, phone[3:])   // 后8位
+				}
 			}
-			// 也加入完整11位作为密码（部分路由器密码设为手机号）
-			full := pf + "0000" + end
-			if len(full) == 11 {
-				passwords = append(passwords, full)
-			}
+		}
+	}
+
+	// 运营商宽带默认密码格式：手机号后8位
+	// 电信/移动/联通装机时常用手机号后8位作为WiFi默认密码
+	for _, pf := range prefixes[:10] { // 取前10个高频号段
+		// 后8位为连续数字
+		for i := 0; i <= 99; i++ {
+			tail := fmt.Sprintf("%04d%04d", i, i)
+			passwords = append(passwords, pf+tail)    // 完整11位
+			passwords = append(passwords, tail)         // 后8位
 		}
 	}
 
@@ -159,30 +171,101 @@ func GeneratePhonePasswords() []string {
 func GenerateRepeatPatterns() []string {
 	var passwords []string
 
-	// 数字重复：AABBCCDD格式
+	// AABBCCDD格式（10^4=10000种）
 	for a := 0; a <= 9; a++ {
 		for b := 0; b <= 9; b++ {
-			if a == b {
-				continue
+			for c := 0; c <= 9; c++ {
+				for d := 0; d <= 9; d++ {
+					passwords = append(passwords, fmt.Sprintf("%d%d%d%d%d%d%d%d", a, a, b, b, c, c, d, d))
+				}
 			}
-			s := fmt.Sprintf("%d%d%d%d%d%d%d%d", a, a, b, b, a, a, b, b)
-			passwords = append(passwords, s)
-			// AAAABBBB格式
-			s2 := fmt.Sprintf("%d%d%d%d%d%d%d%d", a, a, a, a, b, b, b, b)
-			passwords = append(passwords, s2)
 		}
 	}
 
-	// 数字递增递减模式
-	for start := 0; start <= 2; start++ {
-		s := ""
+	// ABCDABCD格式（4位重复）
+	for n := 0; n <= 9999; n++ {
+		s := fmt.Sprintf("%04d", n)
+		passwords = append(passwords, s+s)
+	}
+
+	// ABABABAB格式（2位重复4次）
+	for n := 0; n <= 99; n++ {
+		s := fmt.Sprintf("%02d", n)
+		passwords = append(passwords, s+s+s+s)
+	}
+
+	// 回文数字 ABCDDCBA
+	for n := 0; n <= 9999; n++ {
+		s := fmt.Sprintf("%04d", n)
+		rev := string([]byte{s[3], s[2], s[1], s[0]})
+		passwords = append(passwords, s+rev)
+	}
+
+	// 递增递减（全部起始点）
+	for start := 0; start <= 9; start++ {
+		up := ""
+		down := ""
 		for i := 0; i < 8; i++ {
-			s += fmt.Sprintf("%d", (start+i)%10)
+			up += fmt.Sprintf("%d", (start+i)%10)
+			down += fmt.Sprintf("%d", (start-i+10)%10)
 		}
-		passwords = append(passwords, s)
+		passwords = append(passwords, up)
+		passwords = append(passwords, down)
+	}
+
+	// 4位常见模式组合成8位
+	patterns4 := []string{
+		"0000", "1111", "2222", "3333", "4444", "5555", "6666", "7777",
+		"8888", "9999", "1234", "5678", "9012", "1314", "0520", "5201",
+	}
+	for _, p1 := range patterns4 {
+		for _, p2 := range patterns4 {
+			passwords = append(passwords, p1+p2)
+		}
 	}
 
 	return passwords
+}
+
+// ============================================================
+// GenerateRouterMAC 根据BSSID生成路由器MAC后缀密码
+// 很多路由器默认密码是MAC地址后6位或后8位
+// ============================================================
+func GenerateRouterMAC(bssid string) []string {
+	var passwords []string
+	mac := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(bssid), ":", ""), "-", "")
+	if len(mac) < 8 {
+		return nil
+	}
+	// 后8位
+	passwords = append(passwords, mac[len(mac)-8:])
+	// 后6位补00
+	if len(mac) >= 6 {
+		passwords = append(passwords, mac[len(mac)-6:]+"00")
+		passwords = append(passwords, "00"+mac[len(mac)-6:])
+	}
+	// 全12位MAC作密码
+	if len(mac) == 12 {
+		passwords = append(passwords, mac)
+	}
+	return passwords
+}
+
+// ============================================================
+// GenerateISPDefaults 运营商装机默认密码
+// 电信/移动/联通宽带装机时的常见默认WiFi密码格式
+// ============================================================
+func GenerateISPDefaults() []string {
+	return []string{
+		// 中国电信常见默认
+		"telecomwifi", "chinanet1", "chinatel1",
+		// 中国移动常见默认
+		"cmcc12345", "cmcc123456", "10086wifi",
+		// 中国联通常见默认
+		"chinaunicom", "cucc12345",
+		// 运营商8位数字默认（通常是装机工号或序列号后8位）
+		"20230101", "20240101", "20250101", "20260101",
+	}
 }
 
 // ============================================================
@@ -192,18 +275,33 @@ func GenerateRepeatPatterns() []string {
 // ============================================================
 func GenerateAllChinese() []string {
 	var all []string
+	// 按命中率排序：高频静态 → 运营商默认 → 生日 → 手机号 → 重复模式 → 外部字典
 	all = append(all, TopPasswords...)
+	all = append(all, GenerateISPDefaults()...)
 	all = append(all, GenerateBirthdayPasswords()...)
 	all = append(all, GeneratePhonePasswords()...)
 	all = append(all, GenerateRepeatPatterns()...)
-	// 追加wpa-sec全球已破解密码字典（按频率排序，取前5000条高频）
+	// 追加wpa-sec全球已破解密码字典（取前5000条高频）
 	if wpaSec := loadWPASecDict(); len(wpaSec) > 0 {
 		all = append(all, wpaSec...)
 	}
-	// 追加本地字典（如果存在）
+	// 追加本地字典
 	if local := LoadLocalDict(); len(local) > 0 {
 		all = append(all, local...)
 	}
+	return MergeAndDedup(all)
+}
+
+// ============================================================
+// GenerateAllForTarget 针对特定目标生成完整密码列表
+// 比GenerateAllChinese多了BSSID相关密码（MAC后缀）
+// ============================================================
+func GenerateAllForTarget(ssid, bssid string) []string {
+	var all []string
+	// MAC地址后缀密码（排最前，因为很多路由器默认就是这个）
+	all = append(all, GenerateRouterMAC(bssid)...)
+	// 通用中国字典
+	all = append(all, GenerateAllChinese()...)
 	return MergeAndDedup(all)
 }
 
