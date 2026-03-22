@@ -304,6 +304,8 @@ class MacOSWiFiInterface:
     def connect(self, ssid: str, password: str, security: str = "WPA2") -> bool:
         """
         连接到指定的 WiFi 网络
+        优先使用 CoreWLAN（速度快，WPA2/WPA3过渡模式兼容性好）
+        回退到 networksetup（CoreWLAN不可用时）
 
         Args:
             ssid: WiFi 名称
@@ -313,32 +315,76 @@ class MacOSWiFiInterface:
         Returns:
             是否连接成功
         """
+        # 优先用CoreWLAN（速度快且WPA3兼容性好）
+        if HAS_COREWLAN:
+            result = self._connect_corewlan(ssid, password)
+            if result:
+                return True
+            # CoreWLAN失败，WPA2/WPA3过渡模式重试一次
+            time.sleep(0.5)
+            result = self._connect_corewlan(ssid, password)
+            if result:
+                return True
+
+        # 回退到networksetup
+        return self._connect_networksetup(ssid, password)
+
+    def _connect_corewlan(self, ssid: str, password: str) -> bool:
+        """
+        使用 CoreWLAN associateToNetwork 连接
+        速度快（~300ms），支持WPA2/WPA3过渡模式
+        """
+        try:
+            client = CWWiFiClient.sharedWiFiClient()
+            iface = client.interface()
+            if not iface:
+                return False
+
+            # 从缓存获取CWNetwork对象，避免每次重新扫描
+            target = None
+            if hasattr(self, '_cached_networks') and ssid in self._cached_networks:
+                target = self._cached_networks[ssid]
+            else:
+                # 扫描目标SSID
+                nets, _ = iface.scanForNetworksWithName_error_(ssid, None)
+                if nets:
+                    # 选信号最强的
+                    best = max(nets, key=lambda n: n.rssiValue())
+                    target = best
+                    # 缓存
+                    if not hasattr(self, '_cached_networks'):
+                        self._cached_networks = {}
+                    self._cached_networks[ssid] = target
+
+            if not target:
+                return False
+
+            ok, err = iface.associateToNetwork_password_error_(target, password, None)
+            if ok:
+                self._status = MacOSWiFiStatus.CONNECTED
+                return True
+            return False
+        except Exception:
+            return False
+
+    def _connect_networksetup(self, ssid: str, password: str) -> bool:
+        """
+        回退方案：使用 networksetup 命令连接（较慢，约2-3秒）
+        """
         try:
             self._status = MacOSWiFiStatus.CONNECTING
-
-            # 使用 networksetup 连接 WiFi
             result = subprocess.run(
                 ["networksetup", "-setairportnetwork", self.interface_name, ssid, password],
                 capture_output=True, text=True, timeout=30
             )
-
-            # 检查连接结果
             if result.returncode == 0 and "Error" not in result.stderr:
-                # 验证连接状态
                 time.sleep(2)
                 if self.status() == MacOSWiFiStatus.CONNECTED:
                     self._status = MacOSWiFiStatus.CONNECTED
                     return True
-
             self._status = MacOSWiFiStatus.DISCONNECTED
             return False
-
-        except subprocess.TimeoutExpired:
-            print("连接超时")
-            self._status = MacOSWiFiStatus.DISCONNECTED
-            return False
-        except Exception as e:
-            print(f"连接错误: {e}")
+        except Exception:
             self._status = MacOSWiFiStatus.DISCONNECTED
             return False
 
