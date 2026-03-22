@@ -628,6 +628,9 @@ func runSmartAttack(targets []scanner.WiFiNetwork, dictFile string, delay int, v
 		topPasswords := buildTopPasswords(t.SSID)
 		fmt.Printf("  [Phase 2] 快速验证TOP%d个密码...\n", len(topPasswords))
 		found := false
+		// 必须先断开当前WiFi：已关联状态下associateToNetwork对另一个SSID不可靠
+		scanner.DisconnectWiFi()
+		time.Sleep(300 * time.Millisecond)
 		scanner.CacheTarget(t.SSID) // 预缓存目标，加速后续连接
 		for i, pwd := range topPasswords {
 			fmt.Printf("\r    [%d/%d] 尝试: %-20s", i+1, len(topPasswords), pwd)
