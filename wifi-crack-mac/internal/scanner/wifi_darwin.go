@@ -289,6 +289,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -560,6 +561,8 @@ func CacheTarget(ssid string) bool {
 
 // ============================================================
 // TryConnect 尝试用密码连接WiFi
+// WPA2/WPA3过渡模式下CoreWLAN可能优先走SAE握手导致误判，
+// 因此失败后自动重试一次（间隔500ms让CoreWLAN状态重置）
 // 返回: true=连接成功
 // ============================================================
 func TryConnect(ssid, password string) bool {
@@ -567,6 +570,11 @@ func TryConnect(ssid, password string) bool {
 	cp := C.CString(password)
 	defer C.free(unsafe.Pointer(cs))
 	defer C.free(unsafe.Pointer(cp))
+	if C.connect_wifi(cs, cp) == 0 {
+		return true
+	}
+	// WPA2/WPA3过渡模式重试：首次可能因SAE超时失败，等500ms后重试一次
+	time.Sleep(500 * time.Millisecond)
 	return C.connect_wifi(cs, cp) == 0
 }
 
