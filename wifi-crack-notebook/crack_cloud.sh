@@ -1,10 +1,9 @@
 #!/bin/bash
 # ============================================================================
-# 算家云 GPU 破解脚本 v6.0 (RTX 3090 专用版)
+# 云端 GPU 破解脚本 v6.1 (自动下载字典版)
 # hashcat v6.2.5+ NVIDIA CUDA GPU
 # 中国WiFi密码专用优化 (基于公安部第三研究所密码研究)
-# 新增: hybrid混合攻击 / combinator组合攻击 / multi-rule堆叠 / 随机规则
-# 注意: WPA密码必须 8-63 位, 所有候选均强制过滤
+# 特性: 全网字典自动下载 / 中国密码自动生成 / 零手动上传
 # 用法: bash crack_cloud.sh
 # ============================================================================
 
@@ -14,7 +13,222 @@ HASH_DIR="${SCRIPT_DIR}/hashes"
 DICT_DIR="${SCRIPT_DIR}/dicts"
 WORK_DIR="${SCRIPT_DIR}/work"
 
-mkdir -p "${WORK_DIR}"
+mkdir -p "${WORK_DIR}" "${DICT_DIR}" "${HASH_DIR}"
+
+echo "============================================"
+echo "  WiFi 中国密码专用破解 v6.1 (云端自动版)"
+echo "  hashcat + NVIDIA CUDA GPU"
+echo "  字典: 全网自动下载 + 中国密码自动生成"
+echo "============================================"
+
+# ============================================================================
+# 自动下载: 从 GitHub/公开源下载字典和规则文件
+# ============================================================================
+_dl() {
+    local url="$1" dest="$2"
+    [ -f "$dest" ] && [ -s "$dest" ] && return 0
+    echo "  [下载] $(basename "$dest") ..."
+    wget -q --timeout=30 --tries=3 -O "$dest" "$url" 2>/dev/null || \
+    curl -sfL --connect-timeout 30 --retry 3 -o "$dest" "$url" 2>/dev/null
+    [ -f "$dest" ] && [ -s "$dest" ] && echo "    OK ($(du -h "$dest" | cut -f1))" || { rm -f "$dest"; echo "    失败"; }
+}
+
+echo ""
+echo "── 准备字典文件 ──"
+
+# --- 公开WiFi/WPA专用字典 ---
+_dl "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/Top204Thousand-WPA-probable-v2.txt" \
+    "${DICT_DIR}/probable-wpa.txt"
+_dl "https://raw.githubusercontent.com/hackxc/wifi_dictionary/master/wifi_top2000_passwd.txt" \
+    "${DICT_DIR}/wpa-top4800.txt"
+_dl "https://raw.githubusercontent.com/hackxc/wifi_dictionary/master/Router_default_password.txt" \
+    "${DICT_DIR}/router-defaults.txt"
+_dl "https://raw.githubusercontent.com/hackxc/wifi_dictionary/master/password.txt" \
+    "${DICT_DIR}/hackxc-password.txt"
+
+# --- 全球通用密码字典 (SecLists) ---
+_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/darkweb2017-top10000.txt" \
+    "${DICT_DIR}/darkweb2017-top10k.txt"
+_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" \
+    "${DICT_DIR}/12-pwdb-top1m.txt"
+_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/xato-net-10-million-passwords-1000000.txt" \
+    "${DICT_DIR}/xato-top1m.txt"
+_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10k-most-common.txt" \
+    "${DICT_DIR}/common-10k.txt"
+_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" \
+    "${DICT_DIR}/seclists-wpa4800.txt"
+
+# --- RockYou经典字典 (14M密码, ~139MB) ---
+if [ ! -f "${DICT_DIR}/14-rockyou.txt" ] || [ ! -s "${DICT_DIR}/14-rockyou.txt" ]; then
+    echo "  [下载] RockYou (139MB, 需要几分钟)..."
+    wget -q --timeout=120 --tries=3 -O "${DICT_DIR}/14-rockyou.txt" \
+        "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt" 2>/dev/null || \
+    curl -sfL --connect-timeout 120 --retry 3 -o "${DICT_DIR}/14-rockyou.txt" \
+        "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt" 2>/dev/null
+    [ -f "${DICT_DIR}/14-rockyou.txt" ] && [ -s "${DICT_DIR}/14-rockyou.txt" ] && \
+        echo "    OK ($(du -h "${DICT_DIR}/14-rockyou.txt" | cut -f1))" || echo "    RockYou下载失败(可选)"
+fi
+
+# --- hashcat 高级规则文件 ---
+_dl "https://raw.githubusercontent.com/NotSoSecure/password_cracking_rules/master/OneRuleToRuleThemAll.rule" \
+    "${DICT_DIR}/OneRuleToRuleThemAll.rule"
+
+# ============================================================================
+# 自动生成: 中国WiFi密码专用字典 (无需上传)
+# ============================================================================
+echo ""
+echo "── 生成中国专用字典 ──"
+
+# --- 01: 中国Top50万常见密码 (合并多源) ---
+if [ ! -f "${DICT_DIR}/01-top500k.txt" ] || [ ! -s "${DICT_DIR}/01-top500k.txt" ]; then
+    echo "  [生成] 01-top500k (高频密码合集)..."
+    cat "${DICT_DIR}"/*.txt 2>/dev/null | awk 'length>=8 && length<=63' | sort | uniq -c | sort -rn | awk '{print $2}' | head -500000 > "${DICT_DIR}/01-top500k.txt"
+    echo "    OK ($(wc -l < "${DICT_DIR}/01-top500k.txt" | tr -d ' ') 条)"
+fi
+
+# --- 07: 生日字典 (19780101-20061231, 8位YYYYMMDD) ---
+if [ ! -f "${DICT_DIR}/07-birthdays.txt" ] || [ ! -s "${DICT_DIR}/07-birthdays.txt" ]; then
+    echo "  [生成] 07-birthdays (生日8位)..."
+    python3 -c "
+for y in range(1970, 2027):
+    for m in range(1, 13):
+        for d in range(1, 32):
+            if m in (4,6,9,11) and d > 30: continue
+            if m == 2 and d > 29: continue
+            print(f'{y:04d}{m:02d}{d:02d}')
+" > "${DICT_DIR}/07-birthdays.txt" 2>/dev/null
+    echo "    OK ($(wc -l < "${DICT_DIR}/07-birthdays.txt" | tr -d ' ') 条)"
+fi
+
+# --- 03: 手机号字典 (13X-19X 常见号段) ---
+if [ ! -f "${DICT_DIR}/03-phone-numbers.txt" ] || [ ! -s "${DICT_DIR}/03-phone-numbers.txt" ]; then
+    echo "  [生成] 03-phone-numbers (中国手机号)..."
+    python3 -c "
+import random
+prefixes = [
+    '130','131','132','133','134','135','136','137','138','139',
+    '150','151','152','153','155','156','157','158','159',
+    '170','171','172','173','175','176','177','178',
+    '180','181','182','183','184','185','186','187','188','189',
+    '190','191','193','195','196','197','198','199'
+]
+lines = set()
+for p in prefixes:
+    for i in range(100000):
+        suffix = f'{random.randint(0,99999999):08d}'
+        lines.add(p + suffix)
+        if len(lines) >= 5000000:
+            break
+    if len(lines) >= 5000000:
+        break
+for line in sorted(lines):
+    print(line)
+" > "${DICT_DIR}/03-phone-numbers.txt" 2>/dev/null
+    echo "    OK ($(wc -l < "${DICT_DIR}/03-phone-numbers.txt" | tr -d ' ') 条)"
+fi
+
+# --- 08: 姓名拼音字典 (中国百家姓+常见名) ---
+if [ ! -f "${DICT_DIR}/08-names-pinyin.txt" ] || [ ! -s "${DICT_DIR}/08-names-pinyin.txt" ]; then
+    echo "  [生成] 08-names-pinyin (姓名拼音组合)..."
+    python3 -c "
+surnames = ['wang','li','zhang','liu','chen','yang','zhao','huang','zhou','wu',
+    'xu','sun','hu','zhu','gao','lin','he','guo','ma','luo','liang','song',
+    'zheng','xie','han','tang','feng','yu','dong','xiao','cao','pan','yuan',
+    'cai','jiang','deng','lu','wei','tan','qin','ye','ren','peng','zeng',
+    'dai','fan','shen','su','wen','shi','jin','jia','xia','fu','fang']
+names = ['wei','fang','na','min','jing','li','hua','ping','gang','jun',
+    'yong','jie','yan','ying','lei','qiang','bin','chao','long','ming',
+    'xin','hong','bo','dong','peng','hao','yu','tao','kai','jian',
+    'lin','feng','wen','yang','yun','zhi','qi','rui','xue','ting',
+    'mei','lan','juan','dan','xia','yan','yue','shan','chun','qiu']
+for s in surnames:
+    for n in names:
+        print(s + n)
+        for n2 in names[:20]:
+            print(s + n + n2)
+" > "${DICT_DIR}/08-names-pinyin.txt" 2>/dev/null
+    echo "    OK ($(wc -l < "${DICT_DIR}/08-names-pinyin.txt" | tr -d ' ') 条)"
+fi
+
+# --- 04: 拼音+数字组合字典 ---
+if [ ! -f "${DICT_DIR}/04-pinyin-numbers.txt" ] || [ ! -s "${DICT_DIR}/04-pinyin-numbers.txt" ]; then
+    echo "  [生成] 04-pinyin-numbers (拼音+数字)..."
+    python3 -c "
+words = ['woaini','iloveyou','woaini520','aini1314','wifi','admin','password',
+    'woshishui','nihao','hello','welcome','qwerty','abc','test','love',
+    'happy','lucky','dragon','master','monkey','shadow','sunshine',
+    'princess','football','baseball','letmein','trustno1','wangyue',
+    'zhangwei','liuyang','chenlong','wangfang','zhangjie','liming']
+suffixes = ['','1','12','123','1234','12345','123456','1234567','12345678',
+    '0','00','000','0000','00000','000000','01','02','520','521','1314',
+    '5201314','888','8888','88888','888888','666','6666','66666','666666',
+    '168','520','521','007','110','119','520520','131400','147258','159753',
+    '111','222','333','444','555','666','777','888','999','111111','000000',
+    '2024','2025','2026','1988','1990','1995','1998','2000','2001','2002']
+prefixes = ['','a','i','my','the','love','520','1314','wo','ni']
+results = set()
+for w in words:
+    for s in suffixes:
+        pw = w + s
+        if 8 <= len(pw) <= 63:
+            results.add(pw)
+    for p in prefixes:
+        pw = p + w
+        if 8 <= len(pw) <= 63:
+            results.add(pw)
+        for s in suffixes[:20]:
+            pw = p + w + s
+            if 8 <= len(pw) <= 63:
+                results.add(pw)
+for r in sorted(results):
+    print(r)
+" > "${DICT_DIR}/04-pinyin-numbers.txt" 2>/dev/null
+    echo "    OK ($(wc -l < "${DICT_DIR}/04-pinyin-numbers.txt" | tr -d ' ') 条)"
+fi
+
+# --- 06: 姓氏+生日组合 ---
+if [ ! -f "${DICT_DIR}/06-surnames-birthdays.txt" ] || [ ! -s "${DICT_DIR}/06-surnames-birthdays.txt" ]; then
+    echo "  [生成] 06-surnames-birthdays (姓氏+生日, 约1200万条)..."
+    python3 -c "
+surnames = ['wang','li','zhang','liu','chen','yang','zhao','huang','zhou','wu',
+    'xu','sun','hu','zhu','gao','lin','he','guo','ma','luo','liang','song',
+    'zheng','xie','han','tang','feng','yu','dong','xiao','cao','pan','yuan',
+    'cai','jiang','deng','lu','wei','tan','qin','ye','ren','peng','zeng']
+for s in surnames:
+    for y in range(1978, 2007):
+        for m in range(1, 13):
+            for d in range(1, 32):
+                if m in (4,6,9,11) and d > 30: continue
+                if m == 2 and d > 29: continue
+                print(f'{s}{y:04d}{m:02d}{d:02d}')
+                print(f'{s}{y % 100:02d}{m:02d}{d:02d}')
+" > "${DICT_DIR}/06-surnames-birthdays.txt" 2>/dev/null
+    echo "    OK ($(wc -l < "${DICT_DIR}/06-surnames-birthdays.txt" | tr -d ' ') 条)"
+fi
+
+# --- 11: wpa-sec真实WiFi密码(合并所有WPA相关字典) ---
+if [ ! -f "${DICT_DIR}/11-wpa-sec.txt" ] || [ ! -s "${DICT_DIR}/11-wpa-sec.txt" ]; then
+    echo "  [生成] 11-wpa-sec (WPA真实密码合集)..."
+    cat "${DICT_DIR}/probable-wpa.txt" "${DICT_DIR}/wpa-top4800.txt" "${DICT_DIR}/seclists-wpa4800.txt" \
+        "${DICT_DIR}/darkweb2017-top10k.txt" "${DICT_DIR}/common-10k.txt" 2>/dev/null | \
+        awk 'length>=8 && length<=63' | sort -u > "${DICT_DIR}/11-wpa-sec.txt"
+    echo "    OK ($(wc -l < "${DICT_DIR}/11-wpa-sec.txt" | tr -d ' ') 条)"
+fi
+
+# --- 16: 英文字典 ---
+if [ ! -f "${DICT_DIR}/16-english.txt" ] || [ ! -s "${DICT_DIR}/16-english.txt" ]; then
+    _dl "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt" \
+        "${DICT_DIR}/16-english.txt"
+fi
+
+# --- 统计字典文件 ---
+echo ""
+echo "── 字典准备完毕 ──"
+for f in "${DICT_DIR}"/*.txt "${DICT_DIR}"/*.rule; do
+    [ -f "$f" ] || continue
+    printf "  %-45s %s\n" "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+done
+echo ""
 
 # ── 自动搜索本地定制字典 ──
 CN_CUSTOM=""
@@ -23,11 +237,6 @@ for _p in "${DICT_DIR}/cn_wifi_dict.txt" \
           "${SCRIPT_DIR}/cn_wifi_dict.txt"; do
     [ -f "$_p" ] && CN_CUSTOM="$_p" && break
 done
-
-echo "============================================"
-echo "  WiFi 中国密码专用破解 v6.0 (算家云版)"
-echo "  hashcat + NVIDIA RTX 3090 CUDA GPU"
-echo "============================================"
 
 # ── 检查 hashcat ──
 HASHCAT=$(which hashcat)
