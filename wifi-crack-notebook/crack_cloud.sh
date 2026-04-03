@@ -1,10 +1,11 @@
 #!/bin/bash
 # ============================================================================
-# Mac 本地 WiFi 握手包 GPU 破解脚本 v6.0 (强密码增强版)
-# hashcat v7.1.2 + Apple M1 Metal/OpenCL GPU
+# 算家云 GPU 破解脚本 v6.0 (RTX 3090 专用版)
+# hashcat v6.2.5+ NVIDIA CUDA GPU
 # 中国WiFi密码专用优化 (基于公安部第三研究所密码研究)
 # 新增: hybrid混合攻击 / combinator组合攻击 / multi-rule堆叠 / 随机规则
 # 注意: WPA密码必须 8-63 位, 所有候选均强制过滤
+# 用法: bash crack_cloud.sh
 # ============================================================================
 
 # ── 所有路径基于脚本所在目录，支持任意位置运行 ──
@@ -24,14 +25,14 @@ for _p in "${DICT_DIR}/cn_wifi_dict.txt" \
 done
 
 echo "============================================"
-echo "  WiFi 中国密码专用破解 v6.0 (强密码增强)"
-echo "  hashcat + Apple M1 Metal GPU"
+echo "  WiFi 中国密码专用破解 v6.0 (算家云版)"
+echo "  hashcat + NVIDIA RTX 3090 CUDA GPU"
 echo "============================================"
 
 # ── 检查 hashcat ──
 HASHCAT=$(which hashcat)
 if [ -z "$HASHCAT" ]; then
-    echo "[!] hashcat 未安装: brew install hashcat"
+    echo "[!] hashcat 未安装: apt install -y hashcat"
     exit 1
 fi
 echo "hashcat: $(${HASHCAT} --version)"
@@ -244,7 +245,10 @@ echo ""
 POTFILE="${WORK_DIR}/hashcat.potfile"
 OUTFILE="${WORK_DIR}/cracked.txt"
 
-HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 3 --status --status-timer 15 --hwmon-temp-abort=95 --pw-min=8 --pw-max=63"
+# --force: 兼容 hashcat v6.2.5 的 OpenCL 后端警告
+# -w 4: RTX 3090 满负载工作模式（云端无桌面，不影响交互）
+# -D 1,2: 同时使用 CUDA 和 OpenCL 后端
+HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 4 -D 1,2 --force --status --status-timer 15 --hwmon-temp-abort=90 --pw-min=8 --pw-max=63"
 
 # 查找规则文件（自动搜索所有 homebrew/系统路径）
 RULE_BEST64=""
@@ -356,6 +360,7 @@ run_mask() {
 # ── 计算掩码中固定字符数(用于hybrid预过滤) ──
 _mask_len() {
     # 统计掩码产生的字符数: ?X 算1位, 普通字符算1位
+    # 支持内置字符集(?l?d?u?s?a?h?H?b?B)和自定义字符集(?1?2?3?4)
     echo "$1" | sed 's/?[ldusahHbB1234]/X/g' | wc -c | tr -d ' '
 }
 
@@ -723,9 +728,10 @@ for df in "${DICT_DIR}/wpa-top4800.txt" \
     [ -f "$df" ] || continue
     bname=$(basename "$df" .txt)
     # 1万条随机规则, 每条1-3个函数操作
-    run_random_rules "${bname}+1万随机规则(1-3函数)" "$df" 10000 1 3
-    # 5千条随机规则, 每条3-5个函数操作 (更激进)
-    run_random_rules "${bname}+5千随机规则(3-5函数)" "$df" 5000 3 5
+    # RTX 3090 算力强, 随机规则数量翻10倍
+    run_random_rules "${bname}+10万随机规则(1-3函数)" "$df" 100000 1 3
+    # 5万条随机规则, 每条3-5个函数操作 (更激进)
+    run_random_rules "${bname}+5万随机规则(3-5函数)" "$df" 50000 3 5
 done
 
 # ============================================================================
