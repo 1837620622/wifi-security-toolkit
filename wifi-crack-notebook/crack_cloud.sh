@@ -16,62 +16,14 @@ WORK_DIR="${SCRIPT_DIR}/work"
 mkdir -p "${WORK_DIR}" "${DICT_DIR}" "${HASH_DIR}"
 
 echo "============================================"
-echo "  WiFi 中国密码专用破解 v6.1 (云端自动版)"
+echo "  WiFi 中国密码专用破解 v6.2 (云端自动版)"
 echo "  hashcat + NVIDIA CUDA GPU"
-echo "  字典: 全网自动下载 + 中国密码自动生成"
+echo "  字典: 本地已有 + 中国密码自动生成"
 echo "============================================"
 
-# ============================================================================
-# 自动下载: 从 GitHub/公开源下载字典和规则文件
-# ============================================================================
-_dl() {
-    local url="$1" dest="$2"
-    [ -f "$dest" ] && [ -s "$dest" ] && return 0
-    echo "  [下载] $(basename "$dest") ..."
-    wget -q --timeout=30 --tries=3 -O "$dest" "$url" 2>/dev/null || \
-    curl -sfL --connect-timeout 30 --retry 3 -o "$dest" "$url" 2>/dev/null
-    [ -f "$dest" ] && [ -s "$dest" ] && echo "    OK ($(du -h "$dest" | cut -f1))" || { rm -f "$dest"; echo "    失败"; }
-}
-
+# ── 跳过外网下载，直接使用本地已有字典和规则文件 ──
 echo ""
-echo "── 准备字典文件 ──"
-
-# --- 公开WiFi/WPA专用字典 ---
-_dl "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/Top204Thousand-WPA-probable-v2.txt" \
-    "${DICT_DIR}/probable-wpa.txt"
-_dl "https://raw.githubusercontent.com/hackxc/wifi_dictionary/master/wifi_top2000_passwd.txt" \
-    "${DICT_DIR}/wpa-top4800.txt"
-_dl "https://raw.githubusercontent.com/hackxc/wifi_dictionary/master/Router_default_password.txt" \
-    "${DICT_DIR}/router-defaults.txt"
-_dl "https://raw.githubusercontent.com/hackxc/wifi_dictionary/master/password.txt" \
-    "${DICT_DIR}/hackxc-password.txt"
-
-# --- 全球通用密码字典 (SecLists) ---
-_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/darkweb2017-top10000.txt" \
-    "${DICT_DIR}/darkweb2017-top10k.txt"
-_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" \
-    "${DICT_DIR}/12-pwdb-top1m.txt"
-_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/xato-net-10-million-passwords-1000000.txt" \
-    "${DICT_DIR}/xato-top1m.txt"
-_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10k-most-common.txt" \
-    "${DICT_DIR}/common-10k.txt"
-_dl "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" \
-    "${DICT_DIR}/seclists-wpa4800.txt"
-
-# --- RockYou经典字典 (14M密码, ~139MB) ---
-if [ ! -f "${DICT_DIR}/14-rockyou.txt" ] || [ ! -s "${DICT_DIR}/14-rockyou.txt" ]; then
-    echo "  [下载] RockYou (139MB, 需要几分钟)..."
-    wget -q --timeout=120 --tries=3 -O "${DICT_DIR}/14-rockyou.txt" \
-        "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt" 2>/dev/null || \
-    curl -sfL --connect-timeout 120 --retry 3 -o "${DICT_DIR}/14-rockyou.txt" \
-        "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt" 2>/dev/null
-    [ -f "${DICT_DIR}/14-rockyou.txt" ] && [ -s "${DICT_DIR}/14-rockyou.txt" ] && \
-        echo "    OK ($(du -h "${DICT_DIR}/14-rockyou.txt" | cut -f1))" || echo "    RockYou下载失败(可选)"
-fi
-
-# --- hashcat 高级规则文件 ---
-_dl "https://raw.githubusercontent.com/NotSoSecure/password_cracking_rules/master/OneRuleToRuleThemAll.rule" \
-    "${DICT_DIR}/OneRuleToRuleThemAll.rule"
+echo "── 扫描本地字典文件 ──"
 
 # ============================================================================
 # 自动生成: 中国WiFi密码专用字典 (无需上传)
@@ -215,11 +167,6 @@ if [ ! -f "${DICT_DIR}/11-wpa-sec.txt" ] || [ ! -s "${DICT_DIR}/11-wpa-sec.txt" 
     echo "    OK ($(wc -l < "${DICT_DIR}/11-wpa-sec.txt" | tr -d ' ') 条)"
 fi
 
-# --- 16: 英文字典 ---
-if [ ! -f "${DICT_DIR}/16-english.txt" ] || [ ! -s "${DICT_DIR}/16-english.txt" ]; then
-    _dl "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt" \
-        "${DICT_DIR}/16-english.txt"
-fi
 
 # --- 统计字典文件 ---
 echo ""
@@ -457,7 +404,7 @@ OUTFILE="${WORK_DIR}/cracked.txt"
 # --force: 兼容 hashcat v6.2.5 的 OpenCL 后端警告
 # -w 4: RTX 3090 满负载工作模式（云端无桌面，不影响交互）
 # -D 1,2: 同时使用 CUDA 和 OpenCL 后端
-HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 4 -D 1,2 --force --status --status-timer 15 --hwmon-temp-abort=90 --pw-min=8 --pw-max=63"
+HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 4 -D 1,2 --force --status --status-timer 15 --hwmon-temp-abort=90"
 
 # 查找规则文件（自动搜索所有 homebrew/系统路径）
 RULE_BEST64=""
@@ -723,7 +670,7 @@ for df in "${DICT_DIR}/wpa-top4800.txt" \
           "${DICT_DIR}/06-surnames-birthdays.txt" \
           "${DICT_DIR}/04-pinyin-numbers.txt"; do
     [ -f "$df" ] || continue
-    sz=$(stat -f%z "$df" 2>/dev/null || stat -c%s "$df" 2>/dev/null || echo 0)
+    sz=$(stat -c%s "$df" 2>/dev/null || stat -f%z "$df" 2>/dev/null || echo 0)
     [ "$sz" -lt 52428800 ] || continue
     run_dict_rule "$(basename "$df")+中国规则" "$df" "${RULE_CHINA}"
 done

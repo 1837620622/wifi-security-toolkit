@@ -4,6 +4,8 @@
 
 覆盖**抓包 → 字典 → 规则 → 掩码 → 混合 → 组合**六大攻击维度，专为中国 WiFi 密码习惯深度优化
 
+支持三种破解环境：**Mac 本地 GPU** / **AutoDL 算力云 (www.autodl.com)** / **Kaggle 免费 GPU**
+
 ## 功能特点
 
 - **Scapy 原始帧注入** — 绕过 aireplay-ng 在部分网卡上的兼容性问题
@@ -13,6 +15,7 @@
 - **20+ 字典文件，2.2GB 总量** — 从 4800 条高频到 1.6 亿条超大字典全覆盖
 - **616 条 hashcat 规则（36 层）** — Leet Speak、手机号前缀、年份后缀、键盘走位等
 - **137 条掩码模式（A-W 区）** — 纯数字、字母+数字、特殊字符、QQ号、手机号变体等
+- **AutoDL 算力云 GPU 破解** — 租用 RTX 3090/4090 等高端 GPU，带一键启动/监控/停止脚本
 - **Kaggle 云端免费 GPU 破解方案** — 适合无独立 GPU 的用户
 
 ## 项目结构
@@ -26,9 +29,13 @@ wifi-security-toolkit/
 │   ├── 3_deauth.sh                     # 终端3: Scapy deauth 攻击
 │   └── generate_cn_dict.py             # 中国 WiFi 密码字典生成器
 ├── wifi-crack-notebook/                # 本地/云端 GPU 破解
-│   ├── crack_local.sh                  # Mac 本地 GPU 破解脚本 v6.0 (791行)
+│   ├── crack_local.sh                  # Mac 本地 GPU 破解脚本 v6.0
+│   ├── crack_cloud.sh                  # AutoDL 算力云 GPU 破解脚本
+│   ├── cloud_start.sh                  # 云端一键启动破解任务
+│   ├── cloud_monitor.sh                # 云端实时监控破解进度
+│   ├── cloud_stop.sh                   # 云端停止破解任务
+│   ├── monitor.sh                      # 本地 hashcat 进度监控
 │   ├── kaggle-hashcat-wifi-crack.ipynb # Kaggle 云端破解笔记本
-│   ├── monitor.sh                      # hashcat 进度监控脚本
 │   ├── dicts/                          # 字典+规则+掩码库
 │   │   ├── china-wifi.rule             # 中国WiFi专用规则 (616条/36层)
 │   │   ├── 00-china-wifi-masks.hcmask  # 中国WiFi专用掩码 (137条/A-W区)
@@ -37,7 +44,7 @@ wifi-security-toolkit/
 │   │   ├── 08-names-pinyin.txt         # 姓名拼音字典 (10MB)
 │   │   ├── 06-surnames-birthdays.txt   # 姓氏+生日组合 (120MB)
 │   │   └── ... (共23个文件, 2.2GB)
-│   ├── captures/                       # .hc22000 握手包目录
+│   ├── captures/                       # .22000 握手包目录
 │   └── work/                           # hashcat 工作目录
 ├── .gitignore
 └── README.md
@@ -119,19 +126,63 @@ sudo python3 auto_attack.py wlan0mon <BSSID> <频道> [客户端MAC]
 
 抓到 M1+M2 握手包后自动停止，自动转换 .hc22000 并同步到 Mac
 
-#### 方式2: Mac 本地 GPU 破解（核心功能）
+#### 方式2: Mac 本地 GPU 破解
 
 ```bash
-# 将 .hc22000 文件放入 captures/ 目录，然后运行
+# 将 .22000 文件放入 captures/ 目录，然后运行
 cd wifi-crack-notebook
 bash crack_local.sh
 ```
 
 脚本自动扫描 captures/ 目录中的握手包，执行 10 阶段递进攻击
 
-#### 方式3: Kaggle 云端 GPU 破解
+#### 方式3: AutoDL 算力云 GPU 破解（推荐）
 
-1. 上传 `.hc22000` 文件到 Kaggle Dataset
+租用 [AutoDL](https://www.autodl.com) 的高端 GPU（RTX 3090/4090），适合无本地独显或需要更强算力的用户
+
+1. 在 AutoDL 创建实例，选择带 GPU 的镜像
+2. 通过 SCP 上传文件到实例
+
+```bash
+# 上传破解脚本和握手包（替换 <端口> 和 <主机> 为 AutoDL 提供的实际值）
+scp -P <端口> crack_cloud.sh cloud_start.sh cloud_monitor.sh cloud_stop.sh root@<主机>:/root/wifi-crack/
+scp -P <端口> captures/all_hashes.22000 root@<主机>:/root/wifi-crack/captures/
+```
+
+3. 在 AutoDL WebShell 中运行
+
+```bash
+cd /root/wifi-crack
+
+# 启动破解任务（后台运行）
+nohup bash crack_cloud.sh > crack.log 2>&1 &
+
+# 监控进度（单次查看 / -f 持续刷新）
+bash cloud_monitor.sh
+bash cloud_monitor.sh -f
+
+# 停止任务
+bash cloud_stop.sh
+
+# 实时日志
+tail -f crack.log
+```
+
+4. 在 Mac 上远程操控（可选）
+
+```bash
+# 设置环境变量后，cloud_*.sh 可从 Mac 远程操控云端
+export CLOUD_HOST="connect.westc.seetacloud.com"
+export CLOUD_PORT="44084"
+export CLOUD_PASS="你的SSH密码"
+
+bash cloud_monitor.sh      # 远程查看进度
+bash cloud_stop.sh          # 远程停止任务
+```
+
+#### 方式4: Kaggle 云端免费 GPU 破解
+
+1. 上传 `.22000` 文件到 Kaggle Dataset
 2. 上传 `wifi-crack-notebook/kaggle-hashcat-wifi-crack.ipynb`
 3. 开启 GPU 加速器，运行全部 Cell
 
@@ -180,9 +231,22 @@ bash crack_local.sh
 - **阿里云 TOP10**: 前三名 12345678/123456789/88888888 覆盖 50.1% 样本
 - **曹操WiFi 字典**: 姓名拼音+生日、QQ号、词语拼音、弱口令等组合模式
 
+## 云端破解脚本说明
+
+| 脚本 | 功能 | 说明 |
+|------|------|------|
+| crack_cloud.sh | 云端 GPU 破解主脚本 | 适配 AutoDL 环境，-w 4 满负载，-D 1,2 CUDA+OpenCL |
+| crack_local.sh | Mac 本地 GPU 破解主脚本 | 适配 Metal 后端，-w 3 工作负载 |
+| cloud_start.sh | 一键启动 | 自动清理旧进程 + nohup 后台启动 |
+| cloud_monitor.sh | 实时监控 | 显示 GPU 状态、破解结果、最新日志，支持 -f 持续刷新 |
+| cloud_stop.sh | 停止任务 | 先显示已破解结果，再彻底清理进程 |
+| monitor.sh | 本地监控 | 本地 hashcat 进度实时监控（每5秒刷新） |
+
+所有 cloud_*.sh 脚本自动检测运行环境：在云端 WebShell 中直接本地执行，在 Mac 上通过 SSH 远程执行
+
 ## 免责声明
 
-本工具仅用于安全研究和授权的渗透测试。未经授权对他人网络进行攻击是违法行为。使用者需自行承担所有法律责任。
+本工具仅用于安全研究和授权的渗透测试。未经授权对他人网络进行攻击是违法行为。使用者需自行承担所有法律责任
 
 ## 作者
 

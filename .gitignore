@@ -34,8 +34,14 @@ wifi-crack-notebook/dicts/15-mega160m.txt
 
 # hashcat 工作目录（运行时生成）
 wifi-crack-notebook/work/
+
+# 握手包文件（运行时生成，含敏感数据）
 wifi-crack-notebook/captures/*.hc22000
+wifi-crack-notebook/captures/*.22000
 
 # SSID 定向字典（运行时生成）
 wifi-crack-notebook/dicts/00-ssid-target.txt
+
+# 其他
 wifi-crack-notebook/crack_local copy.sh
+crack.log

@@ -1,6 +1,11 @@
 #!/bin/bash
-# 实时监控 WiFi 破解结果
-WORK="/Users/chuankangkk/Downloads/Wi-Fi破解/wifi-crack-notebook/work"
+# ============================================================================
+# WiFi 破解实时监控 (本地用)
+# 所有路径基于脚本所在目录，支持任意位置运行
+# 用法: bash monitor.sh
+# ============================================================================
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORK="${SCRIPT_DIR}/work"
 POTFILE="${WORK}/hashcat.potfile"
 HASHES="${WORK}/hashes_deduped.22000"
 LAST_CNT=0
@@ -17,16 +22,17 @@ while true; do
         echo "════════════════════════════════════"
         echo "  已破解: ${CNT} 个 WiFi  $(date '+%H:%M:%S')"
         echo "════════════════════════════════════"
-        hashcat -m 22000 "${HASHES}" --potfile-path "${POTFILE}" --show 2>/dev/null | while IFS=: read hash pw; do
-            ssid_hex=$(echo "$hash" | cut -d'*' -f6)
+        # potfile 格式: hash_hex*ssid_hex:password
+        while IFS= read -r line; do
+            pw="${line##*:}"
+            tmp="${line%:*}"
+            ssid_hex="${tmp##*\*}"
             ssid=$(echo "$ssid_hex" | xxd -r -p 2>/dev/null || echo "$ssid_hex")
-            bssid=$(echo "$hash" | cut -d'*' -f4)
-            mac=$(echo "$bssid" | sed 's/\(..\)/\1:/g; s/:$//')
+            [ -z "$ssid" ] && ssid="unknown"
             echo ""
             echo "  WiFi: ${ssid}"
             echo "  密码: ${pw}"
-            echo "  MAC:  ${mac}"
-        done
+        done < "${POTFILE}"
         echo ""
         echo "════════════════════════════════════"
         LAST_CNT=$CNT
