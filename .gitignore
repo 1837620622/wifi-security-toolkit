@@ -27,25 +27,10 @@ __pycache__/
 # 字典文件（运行 generate_cn_dict.py 自动生成）
 cn_wifi_dict.txt
 
-# 大字典文件（超过GitHub 100MB限制, 需本地准备）
-wifi-crack-notebook/dicts/01-top500k.txt
-wifi-crack-notebook/dicts/02-names-cn.txt
-wifi-crack-notebook/dicts/03-phone-numbers.txt
-wifi-crack-notebook/dicts/04-pinyin-numbers.txt
-wifi-crack-notebook/dicts/05-chinese-full-410w.txt
-wifi-crack-notebook/dicts/06-surnames-birthdays.txt
-wifi-crack-notebook/dicts/07-birthdays.txt
-wifi-crack-notebook/dicts/08-names-pinyin.txt
-wifi-crack-notebook/dicts/09-top2m.txt
-wifi-crack-notebook/dicts/10-top5m.txt
-wifi-crack-notebook/dicts/11-wpa-sec.txt
-wifi-crack-notebook/dicts/12-pwdb-top1m.txt
-wifi-crack-notebook/dicts/13-top20m.txt
-wifi-crack-notebook/dicts/14-rockyou.txt
+# 大字典文件通过 Git LFS 跟踪 (>100MB的3个文件)
+# 06-surnames-birthdays.txt, 13-top20m.txt, 14-rockyou.txt
+# mega160m.txt (1.5GB) 通过 GitHub Release 下载
 wifi-crack-notebook/dicts/15-mega160m.txt
-wifi-crack-notebook/dicts/16-english.txt
-wifi-crack-notebook/dicts/17-10digit-numbers.txt
-wifi-crack-notebook/dicts/cn-top100w.txt
 
 # hashcat 工作目录（运行时生成）
 wifi-crack-notebook/work/
@@ -53,3 +38,4 @@ wifi-crack-notebook/captures/*.hc22000
 
 # SSID 定向字典（运行时生成）
 wifi-crack-notebook/dicts/00-ssid-target.txt
+wifi-crack-notebook/crack_local copy.sh

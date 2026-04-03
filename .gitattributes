@@ -1,0 +1,3 @@
+wifi-crack-notebook/dicts/13-top20m.txt filter=lfs diff=lfs merge=lfs -text
+wifi-crack-notebook/dicts/14-rockyou.txt filter=lfs diff=lfs merge=lfs -text
+wifi-crack-notebook/dicts/06-surnames-birthdays.txt filter=lfs diff=lfs merge=lfs -text
