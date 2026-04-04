@@ -244,7 +244,7 @@ echo ""
 POTFILE="${WORK_DIR}/hashcat.potfile"
 OUTFILE="${WORK_DIR}/cracked.txt"
 
-HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 3 --status --status-timer 15 --hwmon-temp-abort=95 --pw-min=8 --pw-max=63"
+HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 3 --status --status-timer 15 --hwmon-temp-abort=95"
 
 # 查找规则文件（自动搜索所有 homebrew/系统路径）
 RULE_BEST64=""
