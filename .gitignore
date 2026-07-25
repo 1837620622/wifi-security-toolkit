@@ -54,7 +54,8 @@ windows/work/
 # 握手包（含敏感数据，禁止入库）
 wifi-crack-notebook/captures/
 wifi-crack-notebook/hashes/
-shared/captures/
+shared/captures/**
+!shared/captures/.gitkeep
 *.hc22000
 *.22000
 # SSID 定向字典（运行时生成）
