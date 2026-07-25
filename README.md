@@ -1,255 +1,257 @@
-# WiFi Security Toolkit — WiFi 安全测试工具包
+# WiFi Security Toolkit
 
-基于 Kali Linux + Scapy + hashcat 的 WPA/WPA2 WiFi 安全测试全流程工具包
+<div align="center">
 
-覆盖**抓包 → 字典 → 规则 → 掩码 → 混合 → 组合**六大攻击维度，专为中国 WiFi 密码习惯深度优化
+**WPA / WPA2 全链路安全测试与算力破解工作台**
 
-支持三种破解环境：**Mac 本地 GPU** / **AutoDL 算力云 (www.autodl.com)** / **Kaggle 免费 GPU**
+`抓包` · `字典` · `规则` · `掩码` · `混合` · `组合` · `云端 GPU`
 
-## 功能特点
+专为中国 WiFi 密码习惯深度优化 · 支持 **Mac 本地 Metal** / **AutoDL** / **Kaggle**
 
-- **Scapy 原始帧注入** — 绕过 aireplay-ng 在部分网卡上的兼容性问题
-- **全自动 Deauth + Disassoc 攻击** — 爆发+静默双模式，自动检测 EAPOL 四次握手
-- **Mac 本地 GPU 破解脚本 v6.0** — 10 阶段递进攻击，73+ 次独立攻击调用，零重复密码空间
-- **中国 WiFi 密码深度优化** — 基于 CERNET 48330 样本研究 + 阿里云 TOP10 + 曹操WiFi 字典研究
-- **20+ 字典文件，2.2GB 总量** — 从 4800 条高频到 1.6 亿条超大字典全覆盖
-- **616 条 hashcat 规则（36 层）** — Leet Speak、手机号前缀、年份后缀、键盘走位等
-- **137 条掩码模式（A-W 区）** — 纯数字、字母+数字、特殊字符、QQ号、手机号变体等
-- **AutoDL 算力云 GPU 破解** — 租用 RTX 3090/4090 等高端 GPU，带一键启动/监控/停止脚本
-- **Kaggle 云端免费 GPU 破解方案** — 适合无独立 GPU 的用户
+[功能矩阵](#核心能力) · [服务与交付](#专业服务与交付) · [快速开始](#快速开始) · [免责声明](#免责声明)
 
-## 项目结构
+</div>
 
+---
+
+## 这是什么
+
+一套面向**授权渗透与安全研究**的 WiFi 攻防工具包：
+
+| 模块 | 能力 |
+|------|------|
+| **Kali 抓包链路** | Scapy 原始帧注入 · Deauth/Disassoc · EAPOL 四次握手自动识别 |
+| **本地 / 云端爆破** | hashcat 10 阶段递进 · 中国规则 + 掩码 + 混合/组合攻击 |
+| **中国密码优化** | 拼音姓名 · 生日 · 运营商/校园 · 弱口令 · CERNET 样本习惯 |
+
+开源仓库交付的是**可运行的工具与规则骨架**。  
+完整商业级字典包、经过筛选的监听网卡、以及一对一部署方案，请走下方服务通道。
+
+---
+
+## 核心能力
+
+```text
+┌─────────────┐    ┌──────────────┐    ┌──────────────────┐
+│  Monitor    │───▶│  Handshake   │───▶│  GPU Crack       │
+│  + Deauth   │    │  .cap/.22000 │    │  dict+rule+mask  │
+└─────────────┘    └──────────────┘    └──────────────────┘
+     Kali / Scapy         hcx tools         hashcat 22000
 ```
+
+- **Scapy 帧注入** — 绕过部分网卡在 aireplay-ng 上的注入失败问题  
+- **爆发 + 静默节奏** — 先踢客户端，再纯监听等重连，提高 M1–M4 捕获率  
+- **10 阶段递进攻击** — 从 SSID 定向到大字典、规则、掩码、hybrid、combinator  
+- **中国场景规则库** — `china-wifi.rule` + 中国专用 hcmask（年份 / 手机号 / 键盘走位 / `.` `@` 等）  
+- **三端算力** — Mac Metal · AutoDL CUDA · Kaggle 免费 GPU Notebook  
+
+---
+
+## 专业服务与交付
+
+> 开源 ≠ 完整弹药库。  
+> 本仓库**不附带全量商业字典**（体积过大，且持续更新）。  
+> 需要**专业网卡 / 完整爆破包 / 工具部署**，请加微信获取。
+
+<div align="center">
+
+### 微信：`1837620622`
+
+### 添加时备注（必填）
+
+# `wifi破解（github）`
+
+未备注可能无法通过 · 备注后说明你需要的是 **网卡 / 字典包 / 工具 / 定制**
+
+</div>
+
+### 三大交付方向
+
+| 交付 | 你得到什么 | 适合谁 |
+|------|------------|--------|
+| **专业 WiFi 网卡** | 支持 Monitor + Injection 的 USB 网卡选型与适配建议；芯片/驱动/虚拟机透传经验；可代购与验货指引 | 新人搭环境、Mac/Windows 虚拟机、稳定抓包 |
+| **WiFi 爆破包** | 中国 WiFi 高命中字典体系（弱口令 · 拼音 · 生日 · 运营商/校园 · 大词库分层）；规则/掩码配套；持续更新说明 | 已有握手包，要拉高命中率 |
+| **WiFi 工具** | 本仓库脚本部署、hashcat 本地/云端跑通、AutoDL 一键流程、问题排查 | 想少踩坑，直接能跑 |
+
+### 为什么加我，而不是只 clone
+
+| 你的目标 | 开源仓库 | 加微信后 |
+|----------|----------|----------|
+| 看懂流程、学习脚本 | 足够 | — |
+| 完整中国密码弹药（多 GB 分层包） | **不全量公开** | **按需交付最新包** |
+| 监听网卡买什么、是否注入成功 | 文档建议 | **按机型/系统定制推荐** |
+| 虚拟机透传、Metal/CUDA、跑挂排查 | 自行摸索 | **远程协助 / 部署指导** |
+| SSID/场景定制字典（校园、运营商、品牌路由） | 基础生成器 | **定制生成与策略** |
+
+### 定制服务示例
+
+- 指定 SSID / 地区 / 运营商习惯的字典与掩码策略  
+- Mac + Parallels Kali / Windows + VMware 环境一条龙跑通  
+- AutoDL / 本地 GPU 任务编排与进度监控  
+- 握手包有效性复核（是否完整 EAPOL / 是否可 hashcat）  
+- 网卡驱动、Monitor 模式、注入失败专项排查  
+
+咸鱼 / B站：**万能程序员** · 邮箱：`2040168455@qq.com`（非 Git 事务）
+
+---
+
+## 仓库结构
+
+```text
 wifi-security-toolkit/
-├── wifi-crack-kali/                    # Kali Linux 攻击+抓包工具
-│   ├── auto_attack.py                  # 全自动攻击脚本（Scapy 单终端）
-│   ├── 1_scan.sh                       # 终端1: 扫描 WiFi
-│   ├── 2_capture.sh                    # 终端2: airodump-ng 抓包
-│   ├── 3_deauth.sh                     # 终端3: Scapy deauth 攻击
-│   └── generate_cn_dict.py             # 中国 WiFi 密码字典生成器
-├── wifi-crack-notebook/                # 本地/云端 GPU 破解
-│   ├── crack_local.sh                  # Mac 本地 GPU 破解脚本 v6.0
-│   ├── crack_cloud.sh                  # AutoDL 算力云 GPU 破解脚本
-│   ├── cloud_start.sh                  # 云端一键启动破解任务
-│   ├── cloud_monitor.sh                # 云端实时监控破解进度
-│   ├── cloud_stop.sh                   # 云端停止破解任务
-│   ├── monitor.sh                      # 本地 hashcat 进度监控
-│   ├── kaggle-hashcat-wifi-crack.ipynb # Kaggle 云端破解笔记本
-│   ├── dicts/                          # 字典+规则+掩码库
-│   │   ├── china-wifi.rule             # 中国WiFi专用规则 (616条/36层)
-│   │   ├── 00-china-wifi-masks.hcmask  # 中国WiFi专用掩码 (137条/A-W区)
-│   │   ├── wpa-top4800.txt             # WPA 高频 TOP4800
-│   │   ├── cn-top100w.txt              # 中国 TOP 100万密码
-│   │   ├── 08-names-pinyin.txt         # 姓名拼音字典 (10MB)
-│   │   ├── 06-surnames-birthdays.txt   # 姓氏+生日组合 (120MB)
-│   │   └── ... (共23个文件, 2.2GB)
-│   ├── captures/                       # .22000 握手包目录
-│   └── work/                           # hashcat 工作目录
-├── .gitignore
-└── README.md
+├── wifi-crack-kali/                 # Kali：扫描 / 抓包 / Scapy 攻击 / 字典生成
+│   ├── 扫描抓包/                    # 1_scan · 2_capture · 3_deauth
+│   ├── 自动攻击/auto_attack.py      # 单终端全自动
+│   └── 字典工具/generate_cn_dict.py
+├── wifi-crack-notebook/             # 本地 / 云端 GPU 爆破
+│   ├── crack_local.sh               # Mac Metal 主脚本
+│   ├── crack_cloud.sh               # AutoDL 云端主脚本
+│   ├── cloud_start|monitor|stop.sh  # 云端运维
+│   ├── kaggle-hashcat-wifi-crack.ipynb
+│   ├── dicts/                       # 规则 · 掩码 · 示例小字典（非全量包）
+│   ├── captures/                    # 放入 .22000 / .cap
+│   └── work/                        # hashcat 工作区（本地生成，不入库）
+├── README.md
+└── .gitignore
 ```
 
-## 破解脚本攻击流程（10 阶段）
+**关于字典：**  
+仓库内保留规则、掩码与**示例级**词表，便于跑通流程。  
+**完整中国 WiFi 爆破包（含大词库 / 持续更新包）请加微信购买获取，备注：`wifi破解（github）`。**
 
-`crack_local.sh` 采用从快到慢、从高命中到低命中的递进策略：
+---
 
-| 阶段 | 攻击方式 | 说明 |
-|------|----------|------|
-| 1 | SSID 定向字典 | 基于目标 SSID 生成专属字典（含 leet 变体、年份、反转等） |
-| 2 | 高命中率字典 | WPA-TOP4800、WPA-SEC、中国 TOP100 万等 |
-| 3 | 规则变换 | 字典 + china-wifi.rule(616条) / best64 规则 |
-| 4 | 全球大字典 | TOP2M → TOP20M → RockYou → mega160M |
-| 5 | 掩码暴力 | 137 条中国专用掩码 + 增量掩码 + 自定义字符集 |
-| 6 | 混合攻击 | 字典+掩码(-a 6) / 掩码+字典(-a 7)，含"."和"@"特殊字符 |
-| 7 | 组合攻击 | 双字典拼接(-a 1)，姓名+数字、短词+年份等 |
-| 8 | 多规则堆叠 | 同时应用两套规则文件（候选量指数级增长） |
-| 9 | 随机规则 | hashcat 随机生成 100 万条规则（覆盖未知模式） |
-| 10 | 结果统计 | 输出破解成功率、清理临时文件 |
+## 攻击流程（10 阶段）
 
-## 核心优化特性
+`crack_local.sh` / `crack_cloud.sh` 采用从快到慢的递进策略：
 
-- **字典预过滤**: 纯字典攻击自动过滤 <8 位和 >63 位词条，节省 GPU 资源
-- **Hybrid 智能过滤**: 根据掩码长度自动计算字典最小词长，避免生成无效候选
-- **is_done 缓存**: 30 秒缓存机制，减少 hashcat --show 频繁调用开销
-- **零重复保证**: 规则文件 0 重复、掩码文件 0 重复、脚本攻击调用 0 重复
-- **临时文件清理**: 脚本结束自动清除 filtered_/hybrid_ 等临时文件
+| 阶段 | 方式 | 说明 |
+|:----:|------|------|
+| 1 | SSID 定向 | 目标名 leet / 年份 / 反转等专属候选 |
+| 2 | 高命中字典 | WPA TOP · 中国弱口令分层 |
+| 3 | 规则变换 | `china-wifi.rule` / best64 |
+| 4 | 大字典 | 全球高频 → 更大词库（完整包另取） |
+| 5 | 掩码 | 中国专用 hcmask（数字/字母/特殊字符区） |
+| 6 | Hybrid | 字典+掩码 / 掩码+字典 |
+| 7 | Combinator | 双字典拼接 |
+| 8 | 多规则堆叠 | 规则文件叠加 |
+| 9 | 随机规则 | 覆盖未知变换 |
+| 10 | 统计清理 | 结果汇总 · 临时文件清理 |
+
+---
 
 ## 快速开始
 
-### 环境要求
+### 环境
 
-- Kali Linux（推荐 2024+ 版本）
-- 支持 Monitor 模式的 USB 无线网卡（推荐 Alfa AWUS036ACH / RTL8812AU 芯片）
-- Python 3 + Scapy（Kali 自带）
-- hashcat v7.1.2+（Mac 端 `brew install hashcat`）
+- Kali Linux（推荐 2024+）  
+- **支持 Monitor + Injection 的 USB 无线网卡**（不确定买什么 → 微信备注获取推荐）  
+- Python3 + Scapy · hashcat 6.2+/7.x  
+- Mac：`brew install hashcat`（Metal/OpenCL）
 
-### Mac 部署步骤
-
-1. Parallels Desktop 安装 Kali Linux ARM64
-2. USB 无线网卡透传到 Kali 虚拟机
-3. Kali 中将脚本复制到桌面
+### 1）Kali 抓包（示意）
 
 ```bash
-cp -r /media/psf/Home/Downloads/Wi-Fi破解/wifi-crack-kali ~/桌面/
-```
-
-4. Mac 安装 hashcat（GPU 破解用）
-
-```bash
-brew install hashcat
-```
-
-### Windows 部署步骤
-
-1. VMware/VirtualBox 安装 Kali Linux
-2. USB 无线网卡透传到 Kali 虚拟机
-3. 将脚本复制到 Kali 中
-4. Windows 安装 hashcat（从 hashcat.net 下载）
-
-### 使用方法
-
-#### 方式1: 全自动抓包（推荐）
-
-```bash
-# 1. 扫描找目标
+# 扫描
 sudo bash 1_scan.sh
 
-# 2. 设置 monitor 模式
+# Monitor
 sudo ip link set wlan0 down
 sudo iw dev wlan0 set type monitor
 sudo ip link set wlan0 up
 
-# 3. 全自动攻击（Scapy 同时收发 + 自动检测 EAPOL）
+# 全自动（Scapy 收发 + EAPOL 检测）
 sudo python3 auto_attack.py wlan0mon <BSSID> <频道> [客户端MAC]
 ```
 
-抓到 M1+M2 握手包后自动停止，自动转换 .hc22000 并同步到 Mac
-
-#### 方式2: Mac 本地 GPU 破解
+### 2）本地 GPU 爆破
 
 ```bash
-# 将 .22000 文件放入 captures/ 目录，然后运行
 cd wifi-crack-notebook
+# 将 .22000 或 .cap 放入 captures/
 bash crack_local.sh
 ```
 
-脚本自动扫描 captures/ 目录中的握手包，执行 10 阶段递进攻击
-
-#### 方式3: AutoDL 算力云 GPU 破解（推荐）
-
-租用 [AutoDL](https://www.autodl.com) 的高端 GPU（RTX 3090/4090），适合无本地独显或需要更强算力的用户
-
-1. 在 AutoDL 创建实例，选择带 GPU 的镜像
-2. 通过 SCP 上传文件到实例
+### 3）AutoDL 云端
 
 ```bash
-# 上传破解脚本和握手包（替换 <端口> 和 <主机> 为 AutoDL 提供的实际值）
-scp -P <端口> crack_cloud.sh cloud_start.sh cloud_monitor.sh cloud_stop.sh root@<主机>:/root/wifi-crack/
-scp -P <端口> captures/all_hashes.22000 root@<主机>:/root/wifi-crack/captures/
-```
-
-3. 在 AutoDL WebShell 中运行
-
-```bash
-cd /root/wifi-crack
-
-# 启动破解任务（后台运行）
+# 上传 crack_cloud.sh + 握手包后
 nohup bash crack_cloud.sh > crack.log 2>&1 &
-
-# 监控进度（单次查看 / -f 持续刷新）
-bash cloud_monitor.sh
 bash cloud_monitor.sh -f
-
-# 停止任务
-bash cloud_stop.sh
-
-# 实时日志
-tail -f crack.log
 ```
 
-4. 在 Mac 上远程操控（可选）
+### 4）Kaggle 免费 GPU
 
-```bash
-# 设置环境变量后，cloud_*.sh 可从 Mac 远程操控云端
-export CLOUD_HOST="connect.westc.seetacloud.com"
-export CLOUD_PORT="44084"
-export CLOUD_PASS="你的SSH密码"
+上传 `.22000` + `kaggle-hashcat-wifi-crack.ipynb`，开启 GPU 后跑通 Notebook。
 
-bash cloud_monitor.sh      # 远程查看进度
-bash cloud_stop.sh          # 远程停止任务
-```
+---
 
-#### 方式4: Kaggle 云端免费 GPU 破解
+## 技术要点
 
-1. 上传 `.22000` 文件到 Kaggle Dataset
-2. 上传 `wifi-crack-notebook/kaggle-hashcat-wifi-crack.ipynb`
-3. 开启 GPU 加速器，运行全部 Cell
+### 为何用 Scapy
 
-## 规则文件详解（china-wifi.rule — 36 层）
+部分 USB 网卡在 aireplay-ng 下注入失败，Scapy raw socket 往往仍可注入。
 
-| 层级 | 内容 | 示例 |
-|------|------|------|
-| 1-3 | 基础变换+数字后缀 | `:` `c` `l` `$1$2$3` |
-| 4-5 | 特殊字符+年份后缀 | `$!` `$@` `$2$0$2$5` |
-| 6 | Leet Speak | `sa@ se3 si1 so0` |
-| 7-8 | 复合操作+前缀 | `c $! ` `^1^2^3` |
-| 9-10 | 键盘走位+中国文化词 | `$q$w$e$r` `$w$i$f$i` |
-| 11-15 | 截断、重复、插入、覆写 | `] $!` `d` `i4!` `o0!` |
-| 16-23 | 日期、超级组合、反转 | `$0$8$0$8` `r $@` |
-| 24-25 | "."和"@"后缀（CERNET 核心发现） | `$.` `$@$1$2$3$4` |
-| 26-28 | 两位年份、弱口令、拼音后缀 | `$8$8` `$n$i$u$b$i` |
-| 29-32 | 九宫格走位、前缀、超级组合 | `$1$4$7$8$5$2$3$6$9` |
-| 33-36 | 手机号前缀、删除+追加、数字替换 | `^5^3^1` `s0!` |
-
-## 技术细节
-
-### 为什么用 Scapy 而不是 aireplay-ng
-
-部分 USB 无线网卡（如 MediaTek MT7921U）在 aireplay-ng 下帧注入被驱动层阻止，但 Scapy 的 raw socket 方式能正常注入
-
-### 攻击策略: 爆发+静默
-
-- **爆发阶段（2秒）**: 发送 256 帧 Deauth+Disassoc，确保踢掉客户端
-- **静默阶段（5秒）**: 完全停止发送，网卡纯监听，等待客户端重连握手
-- 循环直到抓到 M1+M2 或手动 Ctrl+C
-
-### EAPOL 握手识别
-
-通过 Key Info 字段的 ACK/MIC/Install 位精确区分 M1/M2/M3/M4
+### EAPOL 消息位
 
 | 消息 | 方向 | ACK | MIC | Install |
-|------|------|-----|-----|---------|
-| M1 | AP → Client | 1 | 0 | 0 |
-| M2 | Client → AP | 0 | 1 | 0 |
-| M3 | AP → Client | 1 | 1 | 1 |
-| M4 | Client → AP | 0 | 1 | 0 |
+|------|------|:---:|:---:|:-------:|
+| M1 | AP → STA | 1 | 0 | 0 |
+| M2 | STA → AP | 0 | 1 | 0 |
+| M3 | AP → STA | 1 | 1 | 1 |
+| M4 | STA → AP | 0 | 1 | 0 |
 
-### 密码研究参考
+### 密码研究参考（策略来源）
 
-- **CERNET 论文**: 分析 48330 个真实 WiFi 密码，76% 为 8-11 位，"."和"@"为最常用特殊字符
-- **阿里云 TOP10**: 前三名 12345678/123456789/88888888 覆盖 50.1% 样本
-- **曹操WiFi 字典**: 姓名拼音+生日、QQ号、词语拼音、弱口令等组合模式
+- CERNET 类样本：8–11 位占比高，`.` / `@` 等特殊字符习惯  
+- 国内弱口令与拼音+生日、运营商默认模式  
+- 规则与掩码据此分层，而不是盲目全表扫描  
 
-## 云端破解脚本说明
+---
 
-| 脚本 | 功能 | 说明 |
-|------|------|------|
-| crack_cloud.sh | 云端 GPU 破解主脚本 | 适配 AutoDL 环境，-w 4 满负载，-D 1,2 CUDA+OpenCL |
-| crack_local.sh | Mac 本地 GPU 破解主脚本 | 适配 Metal 后端，-w 3 工作负载 |
-| cloud_start.sh | 一键启动 | 自动清理旧进程 + nohup 后台启动 |
-| cloud_monitor.sh | 实时监控 | 显示 GPU 状态、破解结果、最新日志，支持 -f 持续刷新 |
-| cloud_stop.sh | 停止任务 | 先显示已破解结果，再彻底清理进程 |
-| monitor.sh | 本地监控 | 本地 hashcat 进度实时监控（每5秒刷新） |
+## 获取完整资源
 
-所有 cloud_*.sh 脚本自动检测运行环境：在云端 WebShell 中直接本地执行，在 Mac 上通过 SSH 远程执行
+```text
+┌──────────────────────────────────────────────────────────┐
+│  微信  1837620622                                        │
+│  备注  wifi破解（github）                                 │
+│                                                          │
+│  可咨询 / 购买：                                           │
+│    · 专业 WiFi 监听网卡（Monitor + 注入）                  │
+│    · 中国 WiFi 爆破字典包（分层 · 更新 · 场景定制）        │
+│    · WiFi 工具部署与定制（本地 / 云端 / 虚拟机）           │
+└──────────────────────────────────────────────────────────┘
+```
+
+咸鱼 / B站搜索：**万能程序员**
+
+---
 
 ## 免责声明
 
-本工具仅用于安全研究和授权的渗透测试。未经授权对他人网络进行攻击是违法行为。使用者需自行承担所有法律责任
+本项目仅供**安全研究、教学演示与已获授权的渗透测试**使用。  
+未经授权扫描、攻击、破解他人网络属于违法行为。  
+使用者须自行确保合法合规，并承担全部法律责任。  
+作者不对任何滥用行为负责。
+
+---
 
 ## 作者
 
-- 作者: 传康Kk
-- 微信: 1837620622
-- 咸鱼/B站: 万能程序员
+| | |
+|--|--|
+| 作者 | 传康Kk（万能程序员） |
+| 微信 | **1837620622**（备注：`wifi破解（github）`） |
+| 咸鱼 / B站 | 万能程序员 |
+| 邮箱 | 2040168455@qq.com |
+| GitHub | [@1837620622](https://github.com/1837620622) |
+
+---
+
+<div align="center">
+
+**先跑通工具链，再上专业弹药与网卡。**
+
+加微信备注 → `wifi破解（github）` → 说明需求（网卡 / 爆破包 / 工具 / 定制）
+
+</div>

