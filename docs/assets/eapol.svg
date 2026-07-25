@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="300" viewBox="0 0 920 300" role="img" aria-label="EAPOL four-way handshake">
+  <rect width="920" height="300" rx="16" fill="#0f172a" stroke="#1e293b"/>
+  <text x="28" y="34" fill="#94a3b8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" letter-spacing="1.5">EAPOL-KEY FOUR-WAY HANDSHAKE</text>
+  <text x="28" y="56" fill="#64748b" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">四次握手消息流 · 离线评估所需证据</text>
+
+  <!-- endpoints -->
+  <g font-family="ui-sans-serif,system-ui,sans-serif">
+    <rect x="80" y="100" width="100" height="44" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="130" y="127" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="600">AP</text>
+    <rect x="740" y="100" width="100" height="44" rx="10" fill="#1e293b" stroke="#818cf8"/>
+    <text x="790" y="127" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="600">STA</text>
+
+    <!-- vertical guides -->
+    <line x1="130" y1="144" x2="130" y2="270" stroke="#334155" stroke-dasharray="4 4"/>
+    <line x1="790" y1="144" x2="790" y2="270" stroke="#334155" stroke-dasharray="4 4"/>
+
+    <!-- M1 -->
+    <line x1="150" y1="168" x2="750" y2="168" stroke="#38bdf8" stroke-width="2" marker-end="url(#a1)"/>
+    <text x="460" y="162" text-anchor="middle" fill="#7dd3fc" font-size="12">M1 · ANonce  (AP → STA)</text>
+
+    <!-- M2 -->
+    <line x1="750" y1="198" x2="150" y2="198" stroke="#a5b4fc" stroke-width="2"/>
+    <polygon points="150,198 162,193 162,203" fill="#a5b4fc"/>
+    <text x="460" y="192" text-anchor="middle" fill="#c4b5fd" font-size="12">M2 · SNonce + MIC  (STA → AP)  ★ 核心证据</text>
+
+    <!-- M3 -->
+    <line x1="150" y1="228" x2="750" y2="228" stroke="#38bdf8" stroke-width="2"/>
+    <polygon points="750,228 738,223 738,233" fill="#38bdf8"/>
+    <text x="460" y="222" text-anchor="middle" fill="#7dd3fc" font-size="12">M3 · Install / GTK  (authorized pair 更优)</text>
+
+    <!-- M4 -->
+    <line x1="750" y1="258" x2="150" y2="258" stroke="#64748b" stroke-width="1.5"/>
+    <polygon points="150,258 160,254 160,262" fill="#64748b"/>
+    <text x="460" y="252" text-anchor="middle" fill="#94a3b8" font-size="12">M4 · 收尾确认</text>
+  </g>
+  <defs>
+    <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+</svg>

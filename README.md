@@ -1,490 +1,246 @@
 # WiFi Security Toolkit
 
-<div align="center">
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="WiFi Security Toolkit" width="100%" />
+</p>
 
-```text
- ██╗    ██╗██╗███████╗██╗    ███████╗███████╗ ██████╗
- ██║    ██║██║██╔════╝██║    ██╔════╝██╔════╝██╔════╝
- ██║ █╗ ██║██║█████╗  ██║    ███████╗█████╗  ██║     
- ██║███╗██║██║██╔══╝  ██║    ╚════██║██╔══╝  ██║     
- ╚███╔███╔╝██║██║     ██║    ███████║███████╗╚██████╗
-  ╚══╝╚══╝ ╚═╝╚═╝     ╚═╝    ╚══════╝╚══════╝ ╚═════╝
-              SECURITY  ·  TOOLKIT  ·  CN-OPTIMIZED
-```
+<p align="center">
+  <strong>面向授权渗透测试与无线安全研究的 WPA/WPA2 全流程工具链</strong><br/>
+  <em>An end-to-end WPA/WPA2 assessment toolkit for authorized wireless security research</em>
+</p>
 
-### WPA / WPA2 全链路安全测试工作台
+<p align="center">
+  <a href="#方法论与系统架构-methodology"><img src="https://img.shields.io/badge/Methodology-802.11%20%7C%20EAPOL%20%7C%20PBKDF2-0ea5e9?style=flat-square" alt="method" /></a>
+  <a href="#算力侧离线分析-offline-analysis"><img src="https://img.shields.io/badge/Engine-hashcat%20mode%2022000-22c55e?style=flat-square" alt="hashcat" /></a>
+  <a href="#空口侧捕获链路-air-interface"><img src="https://img.shields.io/badge/Capture-Scapy%20%7C%20Monitor%20Mode-a855f7?style=flat-square" alt="scapy" /></a>
+  <a href="#运行环境"><img src="https://img.shields.io/badge/Compute-Mac%20Metal%20%7C%20CUDA%20%7C%20Kaggle-f59e0b?style=flat-square" alt="compute" /></a>
+  <a href="#专业服务与资源获取"><img src="https://img.shields.io/badge/Contact-WeChat%201837620622-ef4444?style=flat-square" alt="contact" /></a>
+</p>
 
-**抓包 → 握手校验 → 哈希导出 → GPU 递进爆破 → 结果回收**
-
-为**中国 WiFi 密码习惯**深度优化 · 适配 **Mac Metal / AutoDL CUDA / Kaggle GPU**
-
-[原理拆解](#一全链路原理拆解) · [工具架构](#二工具架构) · [专业交付](#三专业服务与交付) · [快速开始](#四快速开始) · [免责声明](#七免责声明)
-
-<br/>
-
-| 专业 WiFi 网卡 | 完整爆破字典包 | 工具部署与定制 |
-|:---:|:---:|:---:|
-| Monitor + 注入选型 | 中国分层词库 · 持续更新 | 本地 / 云端 / 虚拟机一条龙 |
-
-**微信 `1837620622`　·　备注（必填）`wifi破解（github）`**
-
-</div>
+<p align="center">
+  <a href="#中文概述">中文</a> ·
+  <a href="#english-overview">English</a> ·
+  <a href="#方法论与系统架构-methodology">方法论</a> ·
+  <a href="#专业服务与资源获取">服务与交付</a> ·
+  <a href="#免责声明-disclaimer">免责声明</a>
+</p>
 
 ---
 
-## 写在前面
+## 中文概述
 
-公开仓库给你的是：**可运行的全链路工程骨架 + 规则/掩码 + 原理文档**。
+本仓库提供一套**可复现**的无线局域网（WLAN）安全评估流水线，覆盖：
 
-完整商业级字典（多 GB 分层弹药）、经过实机验证的监听网卡、以及一对一跑通环境，**不会也不适合全部塞进 GitHub**——体积、合规与更新频率都不允许。
+1. **空口观测与主动诱发**：Monitor Mode、管理帧诱导重连、EAPOL 四次握手捕获；  
+2. **证据规范化**：将捕获数据导出为 hashcat 可处理的 `22000` 哈希表述；  
+3. **离线口令空间搜索**：在中国用户常见口令分布先验下，组织字典、规则、掩码与混合攻击；  
+4. **多算力后端**：本地 GPU（Apple Metal）、云端 CUDA（如 AutoDL）、以及 Kaggle 免费 GPU。
 
-> 你 clone 下来可以**学习原理、跑通流程**。  
-> 你要**更高命中率、少踩坑、直接能打**——加微信拿专业交付。
-
-```text
-┌────────────────────────────────────────────────────────────┐
-│  微信   1837620622                                         │
-│  备注   wifi破解（github）   ← 不备注可能无法通过            │
-│  说明   网卡 / 爆破包 / 工具 / 定制（任选）                  │
-│  咸鱼·B站  万能程序员                                       │
-└────────────────────────────────────────────────────────────┘
-```
+> **研究边界说明**  
+> 公开仓库交付的是**方法、脚本骨架、规则与掩码模板**。完整分层口令语料、经过实测验证的监听网卡方案，以及一对一部署支持，因体量、更新频率与合规约束**不以全量形式托管于 GitHub**。需要完整研究资源者，请见 [专业服务与资源获取](#专业服务与资源获取)。
 
 ---
 
-## 一、全链路原理拆解
+## English Overview
 
-WiFi「破解」不是玄学，而是一条**可复现的工程流水线**。本工具包严格对应这条链路的每一步。
+This repository implements a **reproducible pipeline** for authorized WPA/WPA2-PSK security assessment:
 
-### 1.1 目标在算什么
+| Stage | Objective | Module |
+|-------|-----------|--------|
+| Air interface | Channel monitoring, controlled deauthentication, EAPOL capture | `wifi-crack-kali/` |
+| Evidence export | Normalize handshakes / PMKID into hashcat `22000` | `hcx` tools + scripts |
+| Offline analysis | Prioritized password-space search under CN usage patterns | `wifi-crack-notebook/` |
+| Compute backends | Metal / CUDA / Kaggle GPU | local & cloud scripts |
 
-现代家用/商用 WiFi 常见 **WPA2-PSK（预共享密钥）**：
-
-1. 用户口令（PSK，8–63 字符）经 **PBKDF2-SHA1**（SSID 作 salt，迭代 4096）得到 **PMK**  
-2. 客户端与 AP 通过 **EAPOL 四次握手**协商出 **PTK**，保护单播流量  
-3. 攻击者不需要「在线猜密码」，而是：
-   - **离线**：抓到足够信息后，用字典/规则/掩码在 GPU 上穷举候选 PSK  
-   - 每试一个密码：算 PMK → 验证 MIC/PMKID 是否匹配抓包中的证据  
-
-所以工程拆成两半：
-
-| 半场 | 目标 | 本仓库模块 |
-|------|------|------------|
-| **空口侧** | 合法监听信道 + 诱导重连 + 抓到可验证哈希 | `wifi-crack-kali/` |
-| **算力侧** | 把哈希交给 hashcat，用中国优化的搜索空间打穿 | `wifi-crack-notebook/` |
-
-### 1.2 监听模式（Monitor Mode）为什么必须
-
-普通网卡工作在 **Managed** 模式：只处理「自己关联」的网络，驱动会丢掉别人的 802.11 管理/控制帧。
-
-**Monitor 模式**让网卡把信道上的 802.11 帧原样交给用户态（airodump / Scapy / hcxdumptool）。  
-没有 Monitor，就**没有抓握手**这一说。
-
-进一步还需要：
-
-- **选对信道**（与目标 AP 同信道，否则几乎抓不到）  
-- **USB 透传**到 Kali 虚拟机（Parallels / VMware）  
-- 网卡芯片 + 驱动支持 **帧注入（Injection）**——否则 deauth 踢不下线  
-
-> 这也是为什么「随便买一张 USB 网卡」经常失败。  
-> **专业监听网卡选型**是成功率的第一道分水岭 → 见 [专业交付](#三专业服务与交付)。
-
-### 1.3 四次握手（EAPOL）到底抓什么
-
-客户端重新关联 AP 时，双方交换 **EAPOL-Key** 消息（俗称 M1–M4）：
-
-| 消息 | 方向 | Key Info 要点 | 攻击价值 |
-|------|------|---------------|----------|
-| **M1** | AP → STA | ACK=1, MIC=0 | 携带 **ANonce** |
-| **M2** | STA → AP | ACK=0, MIC=1, Install=0 | 携带 **SNonce + MIC**（可验证） |
-| **M3** | AP → STA | ACK=1, MIC=1, Install=1 | 确认安装密钥 |
-| **M4** | STA → AP | ACK=0, MIC=1 | 收尾 |
-
-对离线破解而言：
-
-- **经典可用**：至少抓到一组 **匹配的 M1+M2**（同一轮 ANonce 语境下）  
-- **更优**：**M2+M3（authorized）** 等完整配对，hcx 工具会标成更高质量 message pair  
-- **另一条路**：**PMKID**（部分 AP 在 RSN IE / EAPOL 中暴露），有时可无需踢客户端  
-
-本仓库 `auto_attack.py` 的严格逻辑：
-
-```text
-识别 M1 → 记录 ANonce 与时间戳
-识别 M2 → 校验：
-          · 距最近 M1 ≤ 5 秒
-          · 属于同一握手语境
-通过才计入有效握手，避免「假 M2 / 错位 nonce」污染结果
-```
-
-导出格式优先 **hashcat mode 22000**（`WPA*01*`=PMKID，`WPA*02*`=EAPOL），一条文本哈希即可上 GPU。
-
-### 1.4 为什么要 Deauth / Disassoc
-
-客户端若已在线且不重连，空口上**长时间没有新的四次握手**。  
-**Deauthentication / Disassociation** 是 802.11 管理帧：通知 STA「你被踢了」，迫使它重新认证 → 重新握手 → 你的监听网卡才能截获 M1–M4。
-
-本工具采用 **爆发 + 静默** 节奏（Scapy 实现）：
-
-```text
-┌──────────────┐     ┌──────────────────────────┐
-│ 爆发段 ~2s   │ ──▶ │ 静默段 ~5s               │
-│ 密集 Deauth  │     │ 停止注入，纯 sniff 握手  │
-│ + Disassoc   │     │ 给客户端重连留出窗口      │
-└──────────────┘     └──────────────────────────┘
-         ▲                        │
-         └──────── 循环直到 M1+M2 ─┘
-```
-
-原理要点：
-
-- **只发攻击帧、不监听** → 容易错过握手  
-- **只监听、不踢** → 可能永远等不到重连  
-- **踢完立刻安静** → 提高「踢掉 → 重连 → 抓到」的命中  
-
-双向构造（AP→广播 / AP→客户端 / 客户端→AP 等）是为了兼容不同 AP 对管理帧的过滤策略。
-
-### 1.5 为什么用 Scapy 而不是只靠 aireplay-ng
-
-在部分 USB 芯片 + 虚拟机透传组合上（例如部分 **MediaTek MT7921U + Parallels ARM64**）：
-
-- `aireplay-ng` 的注入路径可能被驱动/栈挡住  
-- **Scapy 走 raw 802.11 + RadioTap** 构造 `Dot11Deauth` / `Dot11Disas`，用户态发送，兼容性更好  
-
-因此本仓库提供：
-
-| 方式 | 路径 | 场景 |
-|------|------|------|
-| 分终端经典流 | `1_scan` → `2_capture` → `3_deauth` | 熟悉 airodump 的用户 |
-| **单终端全自动** | `auto_attack.py` | 推荐：注入+抓包+握手判定一体 |
-
-辅助优化（脚本内）：
-
-- 监管域/发射功率策略（提升边缘信号下的注入与接收）  
-- 自动识别接口、频道锁定  
-- 抓到有效握手后停火并落盘 `.cap`，可转 `.hc22000`
-
-### 1.6 从抓包到可破解哈希
-
-```text
-.pcap/.cap  ──hcxpcapngtool──▶  WPA*02*...  (22000)
-                 │
-                 ├─ 校验 message pair / replay counter
-                 ├─ 提取 ESSID、AP MAC、STA MAC
-                 └─ 过滤无效/截断帧
-```
-
-校验清单（工具链与人工都应做）：
-
-1. 文件是否是真 802.11 pcap（不是空文件/错封装）  
-2. 是否存在至少 1 组 **RC checked** 的 EAPOL pair 或合法 PMKID  
-3. ESSID 是否正确（隐藏 SSID 需额外处理）  
-4. 是否误把 **challenge-only** 与 **authorized** 质量混为一谈（都能打，成功率不同）  
-
-> 加微信可提供：**握手包有效性复核**（是否值得上大字典）。
-
-### 1.7 算力侧：hashcat 在搜什么空间
-
-hashcat `-m 22000` 对每条候选密码：
-
-```text
-候选 PSK  ──PBKDF2──▶  PMK  ──与抓包 MIC/PMKID 比对──▶  命中则写出明文
-```
-
-搜索空间由你喂的策略决定：
-
-| 模式 | 参数 | 含义 | 本仓库用法 |
-|------|------|------|------------|
-| 字典 | `-a 0` | 按词表逐条试 | 阶段 0–2 高命中与中国词表 |
-| 规则 | `-a 0 -r` | 词表 × 变换规则 | `china-wifi.rule` / best64 |
-| 掩码 | `-a 3` | 按字符类穷举结构 | `00-china-wifi-masks.hcmask` |
-| 组合 | `-a 1` | 两词典左右拼接 | 姓名+数字、短词+年份 |
-| Hybrid | `-a 6/7` | 词典+掩码 / 掩码+词典 | 覆盖「固定前缀+随机尾」 |
-| 随机规则 | `--generate-rules` | 探索未知变换 | 后期兜底 |
-
-**WPA 约束**：候选长度必须 **8–63**。脚本对纯字典/hybrid 会 **预过滤** 非法长度，避免浪费 GPU 周期。
-
-### 1.8 中国 WiFi 密码为什么能「优化」
-
-公开样本与实战经验显示，国内大量 PSK **不是均匀随机**，而是结构化弱口令：
-
-| 模式 | 例子 | 策略落点 |
-|------|------|----------|
-| 连续数字 / 键盘 | `12345678` `1qaz2wsx` | TOP 弱口令字典 |
-| 手机号 / 座机尾号 | `138****5678` | 手机号词表 + 掩码 |
-| 姓名拼音 + 生日 | `zhang19980101` | 姓氏×生日组合 |
-| 年份 / 纪念日 | `...2024` `...0808` | 规则后缀、掩码 |
-| 品牌 / 运营商默认习惯 | 小米 / TP-Link / CMCC | SSID 定向 + ISP 字典 |
-| 特殊字符偏好 | 末尾 `.` `@` `!` | 规则层（CERNET 类观察） |
-
-因此 `crack_local.sh` **不是**「上来就 160M 大字典硬刚」，而是：
-
-```text
-运营商/SSID 定向（若命中）
-    → 秒级 TOP / WPA 真实密码
-    → 中国姓名·拼音·生日·手机号
-    → 规则放大（700+ 条中国规则）
-    → 全球大词表
-    → 掩码 / hybrid / combinator
-    → 多规则 · 随机规则兜底
-```
-
-**先高先验、后广搜索**——同样算力下，命中期望远高于无脑 rockyou。
-
-### 1.9 三端算力怎么选
-
-| 环境 | 后端 | 脚本 | 适合 |
-|------|------|------|------|
-| Mac | Metal / OpenCL | `crack_local.sh` | 随时跑、中小任务 |
-| AutoDL 等云 | CUDA | `crack_cloud.sh` + `cloud_*.sh` | 大字典、长时间任务 |
-| Kaggle | 免费 GPU | `kaggle-hashcat-wifi-crack.ipynb` | 零成本试跑 |
-
-云端脚本支持 WebShell 本地执行，也可从 Mac 经 SSH 远程 `monitor/stop`。
+Open-source artifacts emphasize **methodology and orchestration**. Large-scale commercial wordlists and hardware recommendations are distributed out-of-band (see Services).
 
 ---
 
-## 二、工具架构
+## 方法论与系统架构 (Methodology)
+
+<p align="center">
+  <img src="docs/assets/pipeline.svg" alt="Assessment pipeline" width="920" />
+</p>
+
+### 威胁模型与评估目标
+
+在 **WPA2-PSK** 模型下，口令 \(P\) 经 PBKDF2-HMAC-SHA1（以 SSID 为 salt，迭代 4096）导出成对主密钥（PMK）。终端与接入点通过 **EAPOL-Key 四次握手**协商临时密钥（PTK）。  
+
+评估方在**已获授权**前提下，不依赖在线登录尝试，而是：
+
+\[
+\text{candidate } P' \xrightarrow{\text{PBKDF2}} \text{PMK}' \xrightarrow{\text{verify MIC / PMKID}} \text{accept / reject}
+\]
+
+即：将问题转化为**离线、可并行的密钥材料校验**。
+
+### 空口侧捕获链路 (Air Interface)
+
+<p align="center">
+  <img src="docs/assets/eapol.svg" alt="EAPOL four-way handshake" width="880" />
+</p>
+
+| 环节 | 技术要点 |
+|------|----------|
+| **Monitor Mode** | 使网卡向用户态交付完整 802.11 管理/控制/数据帧；Managed 模式无法稳定获取握手。 |
+| **信道对齐** | 捕获接口必须锁定目标 AP 工作信道，否则有效帧率接近于零。 |
+| **重连诱发** | Deauthentication / Disassociation 促使已关联站点重新认证，从而产生新的 EAPOL 交换。 |
+| **时序策略** | 采用「短时高密度注入 → 静默监听」循环，提高 M1–M2 同轮次配对概率。 |
+| **实现选择** | 部分 USB 芯片在虚拟化透传场景下对 `aireplay-ng` 注入路径不友好；本仓库以 **Scapy 原始 802.11 帧构造**作为兼容路径（见 `auto_attack.py`）。 |
+
+**EAPOL 消息语义（摘要）**
+
+| 消息 | 方向 | 关键信息 | 评估价值 |
+|------|------|----------|----------|
+| M1 | AP → STA | ANonce | 握手轮次锚定 |
+| M2 | STA → AP | SNonce + MIC | 构成可校验证据（需与有效 M1 对齐） |
+| M3 | AP → STA | 安装密钥指示 | 提升 message-pair 质量（authorized） |
+| M4 | STA → AP | 收尾 | 完整性辅助 |
+
+本仓库脚本对 M1→M2 施加**时间窗与轮次一致性约束**，以降低错位 nonce 导致的伪阳性证据。
+
+### 算力侧离线分析 (Offline Analysis)
+
+<p align="center">
+  <img src="docs/assets/attack-space.svg" alt="Password space search strategy" width="880" />
+</p>
+
+hashcat **mode 22000** 统一处理 PMKID（`WPA*01*`）与 EAPOL message pair（`WPA*02*`）。搜索策略遵循**先验优先**原则——先消耗高命中、低成本空间，再扩展至广域字典与结构掩码：
+
+| 次序 | 策略 | 形式化含义 |
+|:----:|------|------------|
+| 0 | SSID / 运营商定向 | 条件分布 \(P(\text{pwd}\mid \text{SSID},\text{ISP})\) 的启发式采样 |
+| 1 | 经验高频表 | 公开泄露与 WPA 长度约束下的高频样本 |
+| 2 | 中国结构语料 | 拼音姓名、生日、手机号段等区域性模式 |
+| 3 | 规则变换 | 词表 \(\times\) 变换算子（leet、年份、前后缀） |
+| 4 | 广域字典 | 全局高频与大规模语料 |
+| 5 | 掩码 / Hybrid / Combinator | 结构穷举与左右拼接 |
+| 6 | 多规则 / 随机规则 | 覆盖未知变换的长尾 |
+
+候选长度强制约束于 WPA 规范区间 **[8, 63]**，脚本层对字典与 hybrid 路径做预过滤，以降低无效 GPU 周期。
+
+### 中国场景口令先验（摘要）
+
+经验研究与公开样本表明，大量民用 PSK **偏离均匀随机**，而呈现可建模结构，例如：连续数字与键盘轨迹、手机号与生日、姓名拼音拼接、品牌/运营商默认习惯，以及有限的特殊字符后缀（如 `.`、`@`）。  
+因此「中国优化」并非口号，而是把**区域口令生成过程**编码进规则文件（`china-wifi.rule`）与掩码集（`00-china-wifi-masks.hcmask`）。
+
+---
+
+## 仓库结构
 
 ```text
 wifi-security-toolkit/
-│
-├── wifi-crack-kali/                 # 空口侧：发现 · 攻击 · 捕获
-│   ├── 扫描抓包/
-│   │   ├── 1_scan.sh                # 周边 AP / 信道侦察
-│   │   ├── 2_capture.sh             # airodump 抓包
-│   │   └── 3_deauth.sh              # Scapy 踢线
-│   ├── 自动攻击/
-│   │   └── auto_attack.py           # ★ 单终端：注入+嗅探+握手判定
-│   ├── 字典工具/
-│   │   └── generate_cn_dict.py      # 中国模式字典生成器
-│   └── 结果/                        # 运行产出（默认不入库）
-│
-├── wifi-crack-notebook/             # 算力侧：哈希 · 爆破 · 监控
-│   ├── crack_local.sh               # Mac GPU 10 阶段递进
-│   ├── crack_cloud.sh               # 云端 GPU 递进
-│   ├── cloud_start|monitor|stop.sh  # 云任务运维
-│   ├── monitor.sh                   # 本地进度
-│   ├── gen_isp_dict.py              # 运营商定向字典
-│   ├── gen_xiaomi_a380.py           # 品牌/型号专项生成示例
+├── wifi-crack-kali/                 # 空口：扫描 · 捕获 · Scapy 攻击 · 字典生成
+│   ├── 扫描抓包/                    # 1_scan · 2_capture · 3_deauth
+│   ├── 自动攻击/auto_attack.py      # 单进程：注入 + 嗅探 + 握手判定
+│   └── 字典工具/generate_cn_dict.py
+├── wifi-crack-notebook/             # 算力：hash 合并 · 递进攻击 · 云运维
+│   ├── crack_local.sh               # macOS Metal / 本地 GPU
+│   ├── crack_cloud.sh               # 云端 CUDA 编排
+│   ├── cloud_{start,monitor,stop}.sh
 │   ├── kaggle-hashcat-wifi-crack.ipynb
-│   ├── dicts/                       # 规则 · 掩码 · 示例词表
-│   │   ├── china-wifi.rule          # 中国 WiFi 规则（700+ 行）
-│   │   ├── 00-china-wifi-masks.hcmask
-│   │   ├── campus-strong-masks.hcmask
-│   │   └── … 示例/分层字典（见下）
-│   ├── captures/                    # 放入 .cap / .22000（本地，不入库）
-│   └── work/                        # potfile / 过滤临时文件
-│
+│   ├── dicts/                       # 规则 · 掩码 · 示例词表（非全量商业语料）
+│   ├── captures/                    # 运行时证据（默认不入库）
+│   └── work/                        # potfile / 临时过滤（默认不入库）
+├── docs/assets/                     # 文档示意图（SVG）
 └── README.md
 ```
 
-### 2.1 爆破递进（本地脚本逻辑摘要）
-
-| 阶段 | 内容 |
-|:----:|------|
-| 0-PRE | 识别 CMCC / 电信 / 联通 / 广电等 → ISP 专用字典优先 |
-| 0 | SSID 定向生成 + WPA Top 精华 |
-| 1 | 高命中：wpa-sec、probable-wpa、中国 Top 等 |
-| 2 | 中国专用：姓名 / 手机 / 拼音数字 / 姓氏生日… |
-| 3+ | 规则、大字典、掩码、hybrid、combinator、多规则、随机规则 |
-
-特性：
-
-- 自动扫描 `hashes/` 与 `captures/`，合并去重 22000 行  
-- 有 `hcxpcapngtool` 时自动把 `.cap` 转哈希  
-- 字典长度过滤、hybrid 最小词长、状态缓存与收尾清理  
-
-### 2.2 仓库里有什么字典、没有什么
-
-| 有（便于跑通与学习） | 没有 / 不全量公开 |
-|----------------------|-------------------|
-| 规则、掩码、小样例词表 | 多 GB 完整中国爆破包 |
-| 脚本可识别的分层文件名 | 持续更新的商业弹药最新版 |
-| 生成器（可自造场景字典） | 手把手环境代配（属服务） |
-
-**完整爆破包请走微信交付，不在 Git 全量上传。**
-
 ---
 
-## 三、专业服务与交付
+## 运行环境
 
-<div align="center">
-
-### 三件套：网卡 · 爆破包 · 工具
-
-**微信：`1837620622`**  
-**添加备注（必填）：`wifi破解（github）`**
-
-备注后直接发：`要网卡` / `要字典` / `要部署` / `要定制` + 你的系统（Mac/Win/Kali）
-
-</div>
-
-### 3.1 专业 WiFi 网卡
-
-| 你遇到的坑 | 服务侧帮你什么 |
-|------------|----------------|
-| 买了网卡进不了 Monitor | 按芯片/驱动/虚拟机组合推荐可打型号 |
-| 能听不能注入 | 区分「仅监听」与「监听+注入」方案 |
-| Mac Parallels / Win VMware 透传失败 | USB 绑定、驱动、接口命名排查思路 |
-| 不知道买哪一张 | **按预算与场景给清单**（可代购/验货指引） |
-
-监听网卡是整条链路的物理前提——字典再强，抓不到握手也是零。
-
-### 3.2 WiFi 爆破包
-
-| 层级 | 内容方向 |
+| 组件 | 建议配置 |
 |------|----------|
-| 高频命中 | 真实 WPA / 弱口令 / 中国 Top 分层 |
-| 中国结构 | 拼音 · 姓名 · 生日 · 手机 · 运营商 |
-| 规则配套 | 与 `china-wifi.rule` / 掩码策略对齐 |
-| 场景包 | 校园、宽带账号习惯、品牌路由等（可定制） |
-| 更新 | 不走 Git 大文件，**按需发放最新包** |
+| 分析主机 | Kali Linux（较新稳定版）或等价发行版 |
+| 射频前端 | 支持 **Monitor + Injection** 的 USB 无线网卡 |
+| 捕获栈 | Python 3、Scapy、hcxtools（可选但推荐） |
+| 离线引擎 | hashcat ≥ 6.2（推荐 7.x）；macOS 可用 Homebrew 安装 |
+| 虚拟化 | Parallels / VMware 等需正确完成 USB 独占透传 |
 
-开源仓库 = 枪械说明书与准星；**爆破包 = 弹药**。要实战命中率，请拿完整包。
+### 最小工作流
 
-### 3.3 WiFi 工具与定制
-
-- 本仓库脚本在你机器上**部署到能跑**  
-- hashcat 本地 Metal / 云端 CUDA 参数调优  
-- AutoDL 启停监控、断点续跑  
-- 握手包是否值得打（有效性复核）  
-- SSID / 地区 / 运营商 **定向字典生成**  
-- 品牌路由专项（仓库内已有生成器思路可扩展）
-
-### 3.4 为什么值得加微信
-
-| | 只 clone | 备注加微信 |
-|--|:--------:|:----------:|
-| 理解 WPA 与脚本原理 | ✅ | ✅ |
-| 完整中国分层字典持续更新 | ❌ | ✅ |
-| 网卡不踩坑清单 | 文档级 | ✅ 实机经验 |
-| 虚拟机透传 / 注入失败排查 | 自行 | ✅ 可协助 |
-| 场景定制与代部署 | ❌ | ✅ |
-| 握手有效性快速判断 | 自行 | ✅ |
-
-咸鱼 / B站：**万能程序员**  
-邮箱：`2040168455@qq.com`（非 Git 事务）
-
----
-
-## 四、快速开始
-
-### 4.1 环境基线
-
-- Kali Linux（推荐较新版本）  
-- **支持 Monitor + Injection 的 USB 无线网卡**  
-- Python3 + Scapy · hashcat 6.2+ / 7.x  
-- Mac 爆破：`brew install hashcat`
-
-### 4.2 空口：全自动抓包（推荐）
+**（1）捕获（示意）**
 
 ```bash
-# 1) 侦察
 sudo bash 1_scan.sh
-
-# 2) 网卡进 Monitor（接口名以实际为准）
-sudo ip link set wlan0 down
-sudo iw dev wlan0 set type monitor
-sudo ip link set wlan0 up
-
-# 3) 单终端全自动：踢线 + 抓 EAPOL + 有效性判定
-sudo python3 auto_attack.py <BSSID> <频道> [SSID] [客户端MAC]
+# 将接口切换至 monitor 后：
+sudo python3 auto_attack.py <BSSID> <channel> [SSID] [client_MAC]
 ```
 
-拿到有效 `.cap` / `.22000` 后，拷到 Mac 的 `wifi-crack-notebook/captures/`。
-
-### 4.3 算力：本地 GPU
+**（2）本地离线分析**
 
 ```bash
 cd wifi-crack-notebook
+# 将 .cap / .22000 置于 captures/
 bash crack_local.sh
-# 自动扫描 captures/ 与 hashes/，执行递进攻击
 ```
 
-### 4.4 算力：AutoDL 云端
-
-```bash
-# 上传 crack_cloud.sh、cloud_*.sh、握手哈希后
-nohup bash crack_cloud.sh > crack.log 2>&1 &
-bash cloud_monitor.sh -f
-bash cloud_stop.sh
-```
-
-### 4.5 算力：Kaggle 免费 GPU
-
-上传握手哈希 + `kaggle-hashcat-wifi-crack.ipynb` → 开 GPU → Run All。
+**（3）云端 / Kaggle**  
+参见 `crack_cloud.sh`、`cloud_*.sh` 与 `kaggle-hashcat-wifi-crack.ipynb`。
 
 ---
 
-## 五、规则与掩码（中国优化摘要）
+## 专业服务与资源获取
 
-`dicts/china-wifi.rule`（700+ 行量级）覆盖例如：
+开源仓库解决的是 **“方法是否可复现”**；下列资源解决的是 **“实验是否可稳定达到更高覆盖率”**。
 
-- 大小写 / 数字后缀 / 年份尾  
-- Leet（`a→@` `i→1` `o→0`…）  
-- 键盘与九宫格走位  
-- 中文场景词缀、手机号前缀片段  
-- CERNET 类样本中常见的 `.` `@` 等尾巴  
+<p align="center">
+  <img src="docs/assets/services.svg" alt="Professional services" width="880" />
+</p>
 
-`00-china-wifi-masks.hcmask`：按结构穷举 8 位以上模式（纯数字区、字母数字区、特殊字符区等），与字典阶段互补——字典打「像人设的密码」，掩码打「有结构但词表未收录」的密码。
+| 交付类别 | 内容 | 适用对象 |
+|----------|------|----------|
+| **专业 WiFi 网卡** | Monitor/注入能力选型、芯片与驱动匹配、虚拟机透传方案 | 空口阶段反复失败、不确定硬件选型者 |
+| **分层爆破语料包** | 中国场景分层字典、与规则/掩码对齐的更新包 | 已有有效握手、需提高离线命中期望者 |
+| **工具部署与定制** | 环境部署、Metal/CUDA 参数、SSID/运营商定向策略、证据有效性复核 | 希望缩短工程落地周期者 |
 
----
+### 联系方式（Contact）
 
-## 六、常见失败点（对照表）
-
-| 现象 | 常见原因 | 方向 |
-|------|----------|------|
-| 扫不到 AP | 非 Monitor / 信道错 / 天线与距离 | 网卡与信道 |
-| 踢不掉客户端 | 无注入、功率不足、管理帧保护 | **换专业网卡 / 调策略** |
-| 有流量无握手 | 无人重连、deauth 节奏不对 | 爆发+静默、指定客户端 MAC |
-| hashcat 无任务 | 不是 22000 / 握手无效 | hcx 转换与校验 |
-| 跑很久零命中 | 空间不对、缺中国结构词表 | **完整爆破包 + 规则** |
-| 虚拟机不稳定 | USB 未独占透传 | 绑定方案（可咨询） |
-
-卡在任何一环：微信备注 **`wifi破解（github）`**，带上系统与现象。
-
----
-
-## 七、免责声明
-
-本项目仅供 **安全研究、教学与已获书面授权的渗透测试** 使用。
-
-- 未经授权对他人网络进行扫描、干扰、抓包或破解 **违法**  
-- 使用者须自行确保合规，并承担全部法律责任  
-- 作者 / 仓库维护者不支持、不参与任何非法用途  
-
-使用本仓库即视为你已阅读并同意上述条款。
-
----
-
-## 八、作者与获取通道
-
-| 项目 | 内容 |
+| 项目 | 信息 |
 |------|------|
-| 作者 | 传康Kk（万能程序员） |
-| **微信** | **1837620622** |
-| **备注** | **`wifi破解（github）`** |
-| 交付 | 专业网卡 · 爆破字典包 · 工具部署与定制 |
+| 微信 WeChat | **1837620622** |
+| 添加备注 Remark | **`wifi破解（github）`**（必填；未备注可能无法通过） |
+| 说明需求 | 网卡 / 语料包 / 部署 / 定制 + 操作系统环境 |
 | 咸鱼 / B站 | 万能程序员 |
 | 邮箱 | 2040168455@qq.com |
-| GitHub | [1837620622/wifi-security-toolkit](https://github.com/1837620622/wifi-security-toolkit) |
+
+<p align="center">
+  <img src="docs/assets/contact.svg" alt="WeChat contact card" width="640" />
+</p>
 
 ---
 
-<div align="center">
+## 常见失效模式（诊断表）
 
-```text
-     原理开源 · 工程可跑 · 弹药与网卡走专业交付
-```
+| 现象 | 可能机理 | 处置方向 |
+|------|----------|----------|
+| 扫描无 AP | 非 Monitor、信道错误、射频距离不足 | 检查接口模式与信道 |
+| 无法踢线 | 无注入能力、功率受限、管理帧保护 | 更换/验证专业网卡 |
+| 有流量无握手 | 站点不重连、诱发节奏不当 | 调整爆发–静默参数；指定客户端 MAC |
+| hashcat 无任务 | 非 22000、握手无效或错位 | `hcxpcapngtool` 复核 message pair |
+| 长时零命中 | 搜索空间与区域先验不匹配 | 引入分层语料与规则（见专业交付） |
 
-### 下一步
+---
 
-1. Star / Fork 本仓库，按文档跑通抓包与 hashcat  
-2. 需要 **网卡 / 完整爆破包 / 部署定制** 时：  
+## 免责声明 (Disclaimer)
 
-# 微信 `1837620622`　备注 `wifi破解（github）`
+本项目仅供 **安全研究、教学演示，以及已获得书面授权的渗透测试** 使用。
 
-3. 一句话说明需求 + 系统环境，即可对接  
+未经授权对他人网络实施扫描、干扰、捕获或口令恢复，可能违反适用法律法规。  
+使用者应自行确保行为合法合规，并承担全部责任。作者与贡献者不对任何滥用行为负责。
 
-**先理解链路，再补齐弹药与射频前端——这才是完整战斗力。**
+---
 
-</div>
+## 作者
+
+**传康Kk（万能程序员）** · GitHub [@1837620622](https://github.com/1837620622)
+
+研究协作与完整实验资源：微信 **1837620622**，备注 **`wifi破解（github）`**。
+
+---
+
+<p align="center">
+  <sub>Methodology open · Artifacts reproducible · Hardware & corpora via professional channels</sub><br/>
+  <sub>方法开源 · 流程可复现 · 射频前端与完整语料经专业渠道交付</sub>
+</p>

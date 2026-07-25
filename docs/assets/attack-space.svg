@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="260" viewBox="0 0 920 260" role="img" aria-label="Search strategy">
+  <rect width="920" height="260" rx="16" fill="#0f172a" stroke="#1e293b"/>
+  <text x="28" y="34" fill="#94a3b8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" letter-spacing="1.5">PRIORITIZED PASSWORD-SPACE SEARCH</text>
+  <text x="28" y="54" fill="#64748b" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">先验优先：高命中低成本 → 广域结构扩展</text>
+
+  <g font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">
+    <!-- funnel bars -->
+    <rect x="80" y="80" width="760" height="28" rx="6" fill="#0ea5e9" opacity="0.9"/>
+    <text x="100" y="99" fill="#0f172a" font-weight="600">Stage 0–1  SSID / ISP 定向 · 经验高频表</text>
+    <text x="820" y="99" text-anchor="end" fill="#0f172a" font-weight="600">cost ↓  hit ↑</text>
+
+    <rect x="120" y="118" width="680" height="28" rx="6" fill="#22d3ee" opacity="0.85"/>
+    <text x="140" y="137" fill="#0f172a" font-weight="600">Stage 2  中国结构语料（拼音 · 生日 · 手机号）</text>
+
+    <rect x="160" y="156" width="600" height="28" rx="6" fill="#818cf8" opacity="0.9"/>
+    <text x="180" y="175" fill="#0f172a" font-weight="600">Stage 3  规则变换（china-wifi.rule）</text>
+
+    <rect x="200" y="194" width="520" height="28" rx="6" fill="#6366f1" opacity="0.85"/>
+    <text x="220" y="213" fill="#e2e8f0" font-weight="600">Stage 4–5  广域字典 · 掩码 · Hybrid · Combinator</text>
+
+    <rect x="260" y="232" width="400" height="18" rx="5" fill="#334155"/>
+    <text x="460" y="245" text-anchor="middle" fill="#94a3b8" font-size="11">Stage 6  multi-rule / random rules · 长尾覆盖</text>
+  </g>
+</svg>
