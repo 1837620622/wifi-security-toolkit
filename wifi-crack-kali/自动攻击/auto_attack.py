@@ -524,27 +524,42 @@ print("  \033[94m[*]\033[0m   接收: %d 帧" % rx_count)
 print("  \033[94m[*]\033[0m   EAPOL: %d 帧" % len(eapol_packets))
 
 # ============================================================
-# 字典配置（按优先级排列）
+# 字典配置（按优先级排列，仓库路径优先，系统路径回退）
 # 中国字典优先，命中率更高
 # ============================================================
-WORDLISTS = [
-    # (名称, 路径, 说明)
-    ("中国 Top100万密码",
-     "/usr/share/seclists/Passwords/Common-Credentials/Language-Specific/Chinese-common-password-list-top-1000000.txt",
-     "中国最常见100万密码，8.6MB"),
-    ("中国综合字典(去重>=8位)",
-     "/usr/share/wordlists/chinese/wifi_cn_combined.txt",
-     "中国+全球合并去重，28MB"),
-    ("中国完整密码库",
-     "/usr/share/seclists/Passwords/Common-Credentials/Language-Specific/Chinese-common-password-list.txt",
-     "中国410万密码，38MB"),
-    ("全球 Top1000万密码",
-     "/usr/share/seclists/Passwords/Common-Credentials/Pwdb_top-10000000.txt",
-     "全球高频密码，91MB"),
-    ("RockYou 经典字典",
-     "/usr/share/wordlists/rockyou.txt",
-     "经典字典，134MB"),
+_REPO_ROOT = os.path.dirname(KALI_ROOT)  # 仓库根
+_DICT_CANDIDATES = [
+    # (名称, 路径列表按优先级, 说明)
+    ("仓库 cn_wifi_dict",
+     [os.path.join(KALI_ROOT, "字典工具", "cn_wifi_dict.txt")],
+     "Kali 字典工具生成的中国弱口令"),
+    ("仓库 wpa-top4800",
+     [os.path.join(_REPO_ROOT, "shared", "dicts", "wpa-top4800.txt"),
+      os.path.join(_REPO_ROOT, "wifi-crack-notebook", "dicts", "wpa-top4800.txt")],
+     "WPA 高频精华"),
+    ("仓库 probable-wpa",
+     [os.path.join(_REPO_ROOT, "shared", "dicts", "probable-wpa.txt"),
+      os.path.join(_REPO_ROOT, "wifi-crack-notebook", "dicts", "probable-wpa.txt")],
+     "Probable WPA"),
+    ("仓库 cn-top100w",
+     [os.path.join(_REPO_ROOT, "shared", "dicts", "cn-top100w.txt"),
+      os.path.join(_REPO_ROOT, "wifi-crack-notebook", "dicts", "cn-top100w.txt")],
+     "中国 Top 约100万"),
+    ("SecLists 中国 Top100万",
+     ["/usr/share/seclists/Passwords/Common-Credentials/Language-Specific/Chinese-common-password-list-top-1000000.txt"],
+     "系统 SecLists（若已安装）"),
+    ("RockYou",
+     ["/usr/share/wordlists/rockyou.txt"],
+     "经典字典（若已安装）"),
 ]
+
+# 展开为实际存在的 (名称, 路径, 说明)
+WORDLISTS = []
+for _name, _paths, _desc in _DICT_CANDIDATES:
+    for _p in _paths:
+        if os.path.isfile(_p):
+            WORDLISTS.append((_name, _p, _desc))
+            break
 
 def run_aircrack_dict(pcap_path, bssid_target, wordlist_path, wordlist_name):
     """使用 aircrack-ng 进行字典攻击，返回 (是否成功, 密码)"""
