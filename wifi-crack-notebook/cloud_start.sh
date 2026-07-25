@@ -10,12 +10,13 @@ CLOUD_HOST="${CLOUD_HOST:-connect.westc.seetacloud.com}"
 CLOUD_PORT="${CLOUD_PORT:-22}"
 CLOUD_PASS="${CLOUD_PASS:-}"
 
-# ── 自动检测运行环境 ──
+# ── 仅当已部署在云端路径时本地执行；否则 SSH 到算力云 ──
+# （不再用 whoami=root 判断，避免本机误伤）
 run_cmd() {
-    if [ -f /root/wifi-crack/crack_cloud.sh ] || [ "$(whoami)" = "root" ]; then
+    if [ -f /root/wifi-crack/crack_cloud.sh ]; then
         eval "$1"
     else
-        if [ -n "$CLOUD_PASS" ]; then
+        if [ -n "$CLOUD_PASS" ] && command -v sshpass >/dev/null 2>&1; then
             SSHPASS="$CLOUD_PASS" sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
                 -p "$CLOUD_PORT" "root@${CLOUD_HOST}" "$1"
         else

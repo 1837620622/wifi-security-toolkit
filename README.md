@@ -13,7 +13,7 @@
   <a href="#方法论与系统架构-methodology"><img src="https://img.shields.io/badge/Methodology-802.11%20%7C%20EAPOL%20%7C%20PBKDF2-0ea5e9?style=flat-square" alt="method" /></a>
   <a href="#算力侧离线分析-offline-analysis"><img src="https://img.shields.io/badge/Engine-hashcat%20mode%2022000-22c55e?style=flat-square" alt="hashcat" /></a>
   <a href="#空口侧捕获链路-air-interface"><img src="https://img.shields.io/badge/Capture-Scapy%20%7C%20Monitor%20Mode-a855f7?style=flat-square" alt="scapy" /></a>
-  <a href="#运行环境"><img src="https://img.shields.io/badge/Compute-Mac%20Metal%20%7C%20CUDA%20%7C%20Kaggle-f59e0b?style=flat-square" alt="compute" /></a>
+  <a href="#算力后端推荐"><img src="https://img.shields.io/badge/Compute-Mac%20Metal%20%7C%20Cloud%20CUDA-f59e0b?style=flat-square" alt="compute" /></a>
   <a href="#专业服务与资源获取"><img src="https://img.shields.io/badge/Contact-WeChat%201837620622-ef4444?style=flat-square" alt="contact" /></a>
 </p>
 
@@ -34,7 +34,8 @@
 1. **空口观测与主动诱发**：Monitor Mode、管理帧诱导重连、EAPOL 四次握手捕获；  
 2. **证据规范化**：将捕获数据导出为 hashcat 可处理的 `22000` 哈希表述；  
 3. **离线口令空间搜索**：在中国用户常见口令分布先验下，组织字典、规则、掩码与混合攻击；  
-4. **多算力后端**：本地 GPU（Apple Metal）、云端 CUDA（如 AutoDL）、以及 Kaggle 免费 GPU。
+4. **多算力后端**：**高性能 Mac（Apple Metal）** 或 **算力云 / 付费 GPU（CUDA）**。  
+   **不推荐 Kaggle**：其 Notebook 环境无法可靠运行完整 hashcat GPU 工作流（驱动、会话、依赖与权限受限）。
 
 > **研究边界说明**  
 > 公开仓库交付的是**方法、脚本骨架、规则与掩码模板**。完整分层口令语料、经过实测验证的监听网卡方案，以及一对一部署支持，因体量、更新频率与合规约束**不以全量形式托管于 GitHub**。需要完整研究资源者，请见 [专业服务与资源获取](#专业服务与资源获取)。
@@ -50,7 +51,7 @@ This repository implements a **reproducible pipeline** for authorized WPA/WPA2-P
 | Air interface | Channel monitoring, controlled deauthentication, EAPOL capture | `wifi-crack-kali/` |
 | Evidence export | Normalize handshakes / PMKID into hashcat `22000` | `hcx` tools + scripts |
 | Offline analysis | Prioritized password-space search under CN usage patterns | `wifi-crack-notebook/` |
-| Compute backends | Metal / CUDA / Kaggle GPU | local & cloud scripts |
+| Compute backends | Apple Metal (Mac) / Cloud CUDA (paid GPU) | `crack_local.sh` · `crack_cloud.sh` |
 
 Open-source artifacts emphasize **methodology and orchestration**. Large-scale commercial wordlists and hardware recommendations are distributed out-of-band (see Services).
 
@@ -130,20 +131,94 @@ hashcat **mode 22000** 统一处理 PMKID（`WPA*01*`）与 EAPOL message pair�
 
 ```text
 wifi-security-toolkit/
-├── wifi-crack-kali/                 # 空口：扫描 · 捕获 · Scapy 攻击 · 字典生成
-│   ├── 扫描抓包/                    # 1_scan · 2_capture · 3_deauth
-│   ├── 自动攻击/auto_attack.py      # 单进程：注入 + 嗅探 + 握手判定
-│   └── 字典工具/generate_cn_dict.py
-├── wifi-crack-notebook/             # 算力：hash 合并 · 递进攻击 · 云运维
-│   ├── crack_local.sh               # macOS Metal / 本地 GPU
-│   ├── crack_cloud.sh               # 云端 CUDA 编排
-│   ├── cloud_{start,monitor,stop}.sh
-│   ├── kaggle-hashcat-wifi-crack.ipynb
-│   ├── dicts/                       # 规则 · 掩码 · 示例词表（非全量商业语料）
-│   ├── captures/                    # 运行时证据（默认不入库）
-│   └── work/                        # potfile / 临时过滤（默认不入库）
-├── docs/assets/                     # 文档示意图（SVG）
+│
+├── shared/                          ★ 跨平台共享（字典 + 握手包）
+│   ├── dicts/  →  wifi-crack-notebook/dicts
+│   ├── captures/                    # 默认放入 .hc22000 / .cap
+│   └── README.md
+│
+├── mac/                             ★ macOS / Apple Silicon 专用
+│   ├── crack.sh                     # 入口（Metal，自动读 shared/dicts）
+│   ├── monitor.sh
+│   └── README.md
+│
+├── windows/                         ★ Windows GPU 专用（CUDA/OpenCL）
+│   ├── crack.ps1 / crack.bat        # 入口（自动读 shared\dicts）
+│   └── README.md
+│
+├── wifi-crack-kali/                 # 空口抓包（Kali）
+│   ├── 扫描抓包/  自动攻击/  字典工具/
+│
+├── wifi-crack-notebook/             # 破解引擎本体 + 云脚本 + 真实字典存储
+│   ├── crack_local.sh               # Mac 引擎（支持 --hash/--dict-dir）
+│   ├── crack_cloud.sh               # 算力云 CUDA
+│   └── dicts/                       # 大字典实际目录
+│
+├── docs/
+│   ├── 01-抓包教程.md
+│   ├── 02-推荐工具.md
+│   ├── 03-字典与握手包目录.md
+│   └── assets/                      # SVG 示意图
 └── README.md
+```
+
+| 你是谁 | 从哪开始 |
+|--------|----------|
+| 只抓包 | [`docs/01-抓包教程.md`](docs/01-抓包教程.md) + `wifi-crack-kali/` |
+| 用 Mac 爆破 | [`mac/README.md`](mac/README.md) → `bash mac/crack.sh` |
+| 用 Windows 爆破 | [`windows/README.md`](windows/README.md) → `.\windows\crack.ps1` |
+| 租 GPU 云 | `wifi-crack-notebook/crack_cloud.sh` |
+| 查字典放哪 | [`docs/03-字典与握手包目录.md`](docs/03-字典与握手包目录.md) |
+| 工具选型 | [`docs/02-推荐工具.md`](docs/02-推荐工具.md) |
+---
+
+## 算力后端推荐
+
+> **结论先讲清楚**  
+> - **不要用 Kaggle** 跑本仓库的 hashcat 流程：环境无法稳定提供可用的 hashcat GPU 运行时。  
+> - **首选**：高性能 **Apple Silicon Mac（Metal）** 本机递进攻击。  
+> - **大规模字典 / 长时间任务**：租用 **算力云或付费 GPU（CUDA）**（如 AutoDL 等）。
+
+### 方案对比
+
+| 后端 | 适用场景 | 说明 |
+|------|----------|------|
+| **Mac Metal（推荐日常）** | 中小任务、随时调试、中国分层字典优先打击 | `crack_local.sh`；统一内存利于大词表缓存 |
+| **算力云 / 付费 GPU（推荐重活）** | 广域字典、规则爆炸、掩码长跑 | `crack_cloud.sh` + `cloud_*.sh`；RTX 3090/4090 等 |
+| ~~Kaggle 免费 GPU~~ | — | **已移除**：无法可靠运行 hashcat |
+
+### 高性能 Mac 选型（Apple Silicon）
+
+离线 WPA（`-m 22000`）对 **GPU 算力 + 统一内存带宽** 敏感。在 macOS 上 hashcat 走 **Metal**，优先考虑高规格 SoC：
+
+| 优先级 | 机型方向 | 理由（研究部署视角） |
+|:------:|----------|----------------------|
+| ★★★ | **Mac Studio（M2 Ultra / M3 Ultra / M4 Max 高配）** | 桌面级散热与持续功耗；多 GPU 核 + 大统一内存，适合长任务 |
+| ★★★ | **MacBook Pro 16″（M3 Max / M4 Max，≥64GB）** | 便携与性能折中；Max 芯片 GPU 核数显著高于 Pro/Air |
+| ★★ | **Mac mini（M4 Pro，≥48–64GB）** | 体积小、性价比高；适合固定工位本机算力 |
+| ★ | MacBook Air / 入门 M 系列 | 可跑通流程，但大字典与规则阶段吞吐明显受限 |
+
+**配置建议（经验阈值）**
+
+- **统一内存**：尽量 **≥64GB**（跑多层字典 + 规则时更从容；32GB 仅适合小词表验证）。  
+- **芯片**：优先 **Max / Ultra**（GPU 核心与媒体/计算单元更充足），避免仅用基础 M 系列做重活。  
+- **散热**：Studio / 16″ Pro 的持续性能稳定性通常优于 Air。  
+- **软件**：`brew install hashcat`，以官方/稳定版本为准；任务前用 `hashcat -I` 确认 Metal 设备可见。
+
+### 算力云 / 付费 GPU
+
+| 要点 | 建议 |
+|------|------|
+| 平台示例 | [AutoDL](https://www.autodl.com) 等提供 CUDA 与持久磁盘的实例 |
+| 卡型 | RTX 3090 / 4090 等消费级大显存卡性价比通常更好 |
+| 编排 | 上传 `crack_cloud.sh` 与握手哈希后，用 `cloud_start.sh` / `cloud_monitor.sh` / `cloud_stop.sh` |
+| 远程 | Mac 侧可设 `CLOUD_HOST` / `CLOUD_PORT` / `CLOUD_PASS` 经 SSH 运维 |
+
+```bash
+# 云端实例内
+cd /root/wifi-crack
+nohup bash crack_cloud.sh > crack.log 2>&1 &
+bash cloud_monitor.sh -f
 ```
 
 ---
@@ -152,34 +227,43 @@ wifi-security-toolkit/
 
 | 组件 | 建议配置 |
 |------|----------|
-| 分析主机 | Kali Linux（较新稳定版）或等价发行版 |
+| 空口分析主机 | Kali Linux（较新稳定版）或等价发行版 |
 | 射频前端 | 支持 **Monitor + Injection** 的 USB 无线网卡 |
 | 捕获栈 | Python 3、Scapy、hcxtools（可选但推荐） |
-| 离线引擎 | hashcat ≥ 6.2（推荐 7.x）；macOS 可用 Homebrew 安装 |
+| 离线引擎 | hashcat ≥ 6.2（推荐 7.x）；macOS：`brew install hashcat` |
+| 本地算力 | 高性能 Apple Silicon Mac（见上表） |
+| 云算力 | 付费 CUDA GPU 实例（AutoDL 等） |
 | 虚拟化 | Parallels / VMware 等需正确完成 USB 独占透传 |
 
 ### 最小工作流
 
-**（1）捕获（示意）**
+**（1）捕获** — 详见 [`docs/01-抓包教程.md`](docs/01-抓包教程.md)
 
 ```bash
-sudo bash 1_scan.sh
-# 将接口切换至 monitor 后：
+cd wifi-crack-kali/自动攻击
 sudo python3 auto_attack.py <BSSID> <channel> [SSID] [client_MAC]
+# 将 .hc22000 / .cap 拷到 shared/captures/
 ```
 
-**（2）本地离线分析**
+**（2）Mac 本地（Metal）**
 
 ```bash
-cd wifi-crack-notebook
-# 将 .cap / .22000 置于 captures/
-bash crack_local.sh
+bash mac/crack.sh
+# 或指定握手包 / 字典
+bash mac/crack.sh --hash ./a.hc22000 --dict-dir ./shared/dicts
 ```
 
-**（3）云端 / Kaggle**  
-参见 `crack_cloud.sh`、`cloud_*.sh` 与 `kaggle-hashcat-wifi-crack.ipynb`。
+**（3）Windows 本地（CUDA/OpenCL）**
 
----
+```powershell
+cd windows
+.\crack.ps1
+.\crack.ps1 -Hash D:\a.hc22000 -DictDir D:\dicts
+```
+
+**（4）算力云 / 付费 GPU** — `wifi-crack-notebook/crack_cloud.sh` 与 `cloud_*.sh`  
+
+脚本均会 **自动扫描 `shared/dicts` 与 `shared/captures`**，也支持命令行指定单个握手包。---
 
 ## 专业服务与资源获取
 

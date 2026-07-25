@@ -1,34 +1,106 @@
 #!/bin/bash
 # ============================================================================
-# Mac 本地 WiFi 握手包 GPU 破解脚本 v6.0 (强密码增强版)
-# hashcat v7.1.2 + Apple M1 Metal/OpenCL GPU
-# 中国WiFi密码专用优化 (基于公安部第三研究所密码研究)
-# 新增: hybrid混合攻击 / combinator组合攻击 / multi-rule堆叠 / 随机规则
-# 注意: WPA密码必须 8-63 位, 所有候选均强制过滤
+# Mac 本地 WiFi 握手包 GPU 破解脚本 v6.2 (Apple Silicon Metal)
+# 中国WiFi密码专用优化 · hybrid / combinator / multi-rule / 随机规则
+# WPA 密码长度 8-63；字典默认读 shared/dicts
+#
+# 用法:
+#   bash crack_local.sh
+#   bash crack_local.sh --hash ./a.hc22000 --dict-dir ../shared/dicts
+#   bash crack_local.sh --cap ./hs.cap --capture-dir ./my_caps
 # ============================================================================
 
-# ── 所有路径基于脚本所在目录，支持任意位置运行 ──
+# ── 路径：脚本目录 + 仓库根（支持放在 mac/ 或 wifi-crack-notebook/）──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -d "${SCRIPT_DIR}/../shared/dicts" ]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+elif [ -d "${SCRIPT_DIR}/../../shared/dicts" ]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
+
+# 默认：共享字典 / 多源握手目录 / 本侧 work
+DICT_DIR="${WIFI_DICT_DIR:-}"
+WORK_DIR="${WIFI_WORK_DIR:-${SCRIPT_DIR}/work}"
 HASH_DIR="${SCRIPT_DIR}/hashes"
-DICT_DIR="${SCRIPT_DIR}/dicts"
-WORK_DIR="${SCRIPT_DIR}/work"
+CAPTURE_DIRS=()
+EXTRA_HASH_FILES=()
+EXTRA_CAP_FILES=()
+
+usage() {
+    cat <<'USAGE'
+Mac Metal 破解 · 参数
+
+  --dict-dir DIR       字典目录（默认 shared/dicts 或本目录 dicts）
+  --work-dir DIR       工作目录（potfile/临时文件）
+  --capture-dir DIR    额外扫描的握手目录（可多次）
+  --hash FILE          指定 .22000 / .hc22000（可多次）
+  --cap FILE           指定 .cap/.pcap/.pcapng（可多次，需 hcxpcapngtool）
+  -h, --help           帮助
+
+无参数时自动扫描:
+  shared/captures, shared/captures_legacy,
+  wifi-crack-notebook/captures, 脚本旁 captures/hashes
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dict-dir) DICT_DIR="$2"; shift 2 ;;
+        --work-dir) WORK_DIR="$2"; shift 2 ;;
+        --capture-dir) CAPTURE_DIRS+=("$2"); shift 2 ;;
+        --hash) EXTRA_HASH_FILES+=("$2"); shift 2 ;;
+        --cap) EXTRA_CAP_FILES+=("$2"); shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "[!] 未知参数: $1"; usage; exit 1 ;;
+    esac
+done
+
+# 解析默认字典目录
+if [ -z "$DICT_DIR" ]; then
+    for _d in \
+        "${REPO_ROOT}/shared/dicts" \
+        "${SCRIPT_DIR}/dicts" \
+        "${REPO_ROOT}/wifi-crack-notebook/dicts"; do
+        if [ -d "$_d" ]; then DICT_DIR="$_d"; break; fi
+    done
+fi
+[ -d "$DICT_DIR" ] || { echo "[!] 字典目录不存在: ${DICT_DIR:-未设置}"; exit 1; }
+
+# 默认握手扫描目录
+if [ ${#CAPTURE_DIRS[@]} -eq 0 ] && [ ${#EXTRA_HASH_FILES[@]} -eq 0 ] && [ ${#EXTRA_CAP_FILES[@]} -eq 0 ]; then
+    for _d in \
+        "${REPO_ROOT}/shared/captures" \
+        "${REPO_ROOT}/shared/captures_legacy" \
+        "${REPO_ROOT}/wifi-crack-notebook/captures" \
+        "${SCRIPT_DIR}/captures" \
+        "${HASH_DIR}"; do
+        [ -d "$_d" ] && CAPTURE_DIRS+=("$_d")
+    done
+fi
 
 mkdir -p "${WORK_DIR}"
 
 # ── 自动搜索本地定制字典 ──
 CN_CUSTOM=""
 for _p in "${DICT_DIR}/cn_wifi_dict.txt" \
-          "${SCRIPT_DIR}/../wifi-crack-kali/cn_wifi_dict.txt" \
-          "${SCRIPT_DIR}/cn_wifi_dict.txt"; do
+          "${REPO_ROOT}/wifi-crack-kali/字典工具/cn_wifi_dict.txt" \
+          "${REPO_ROOT}/wifi-crack-kali/cn_wifi_dict.txt"; do
     [ -f "$_p" ] && CN_CUSTOM="$_p" && break
 done
 
-echo "============================================"
-echo "  WiFi 中国密码专用破解 v6.0 (强密码增强)"
-echo "  hashcat + Apple M1 Metal GPU"
-echo "============================================"
+CN_QUICKHIT="${DICT_DIR}/cn-sources/latest/merged/cn-wifi-quickhit-8plus.txt"
+[ -f "$CN_QUICKHIT" ] || CN_QUICKHIT=""
 
-# ── 检查 hashcat ──
+echo "============================================"
+echo "  WiFi 中国密码专用破解 v6.2  [Mac Metal]"
+echo "  hashcat + Apple Silicon"
+echo "============================================"
+echo "  字典目录: ${DICT_DIR}"
+echo "  工作目录: ${WORK_DIR}"
+echo ""
+
 HASHCAT=$(which hashcat)
 if [ -z "$HASHCAT" ]; then
     echo "[!] hashcat 未安装: brew install hashcat"
@@ -39,33 +111,55 @@ ${HASHCAT} -I 2>/dev/null | grep -E "Name|Type" | head -4
 echo ""
 
 # ============================================================================
-# 第一步: 扫描所有 hash 文件，合并去重
+# 第一步: 扫描 / 加载握手包，合并去重
 # ============================================================================
 echo "── 扫描握手包 ──"
 MERGED="${WORK_DIR}/all_merged.22000"
 > "${MERGED}"
 
-# 扫描 hashes/ 和 captures/ 两个目录
-for SCAN_DIR in "${HASH_DIR}" "${SCRIPT_DIR}/captures"; do
-    [ -d "${SCAN_DIR}" ] || continue
-    find "${SCAN_DIR}" \( -name "*.22000" -o -name "*.hc22000" \) -print0 | while IFS= read -r -d '' f; do
-        echo "  + $(basename "$f")"
-        grep "^WPA\*" "$f" >> "${MERGED}" 2>/dev/null
-    done
-    if command -v hcxpcapngtool &>/dev/null; then
-        find "${SCAN_DIR}" \( -name "*.cap" -o -name "*.pcap" -o -name "*.pcapng" \) -print0 | while IFS= read -r -d '' f; do
-            echo "  + 转换 $(basename "$f")"
-            TMP="${WORK_DIR}/tmp_cap.22000"
-            hcxpcapngtool --all -o "${TMP}" "$f" 2>/dev/null
-            [ -f "${TMP}" ] && grep "^WPA\*" "${TMP}" >> "${MERGED}" 2>/dev/null && rm -f "${TMP}"
-        done
+_append_hash_file() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    echo "  + hash $(basename "$f")"
+    grep -E '^(WPA\*|\$HEX)' "$f" >> "${MERGED}" 2>/dev/null || grep "^WPA\*" "$f" >> "${MERGED}" 2>/dev/null
+}
+
+_append_cap_file() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    if ! command -v hcxpcapngtool &>/dev/null; then
+        echo "  ! 跳过 cap（未安装 hcxpcapngtool）: $(basename "$f")"
+        return 0
     fi
+    echo "  + 转换 $(basename "$f")"
+    local TMP="${WORK_DIR}/tmp_cap.22000"
+    hcxpcapngtool -o "${TMP}" "$f" 2>/dev/null
+    [ -f "${TMP}" ] && grep "^WPA\*" "${TMP}" >> "${MERGED}" 2>/dev/null
+    rm -f "${TMP}"
+}
+
+for f in "${EXTRA_HASH_FILES[@]}"; do _append_hash_file "$f"; done
+for f in "${EXTRA_CAP_FILES[@]}"; do _append_cap_file "$f"; done
+
+for SCAN_DIR in "${CAPTURE_DIRS[@]}"; do
+    [ -d "${SCAN_DIR}" ] || continue
+    echo "  目录: ${SCAN_DIR}"
+    while IFS= read -r -d '' f; do
+        _append_hash_file "$f"
+    done < <(find "${SCAN_DIR}" \( -name "*.22000" -o -name "*.hc22000" \) -print0 2>/dev/null)
+    while IFS= read -r -d '' f; do
+        _append_cap_file "$f"
+    done < <(find "${SCAN_DIR}" \( -name "*.cap" -o -name "*.pcap" -o -name "*.pcapng" \) -print0 2>/dev/null)
 done
 
 HASHES="${WORK_DIR}/hashes_deduped.22000"
 sort -u "${MERGED}" > "${HASHES}"
 TOTAL_LINES=$(wc -l < "${HASHES}" | tr -d ' ')
-[ "$TOTAL_LINES" -eq 0 ] && echo "[!] 未发现有效hashline" && exit 1
+if [ "$TOTAL_LINES" -eq 0 ]; then
+    echo "[!] 未发现有效 hashline"
+    echo "    请将 .hc22000/.cap 放入 shared/captures/ 或使用 --hash / --cap"
+    exit 1
+fi
 
 echo ""
 echo "── 目标 AP ──"
@@ -294,9 +388,15 @@ is_done() {
     local now=$(date +%s)
     [ $((now - _LAST_CHECK)) -lt 30 ] && return 1
     _LAST_CHECK=$now
-    # 用 hashcat --show 只统计当前 hash 文件中已破解的条数
-    local cracked=$( ${HASHCAT} -m 22000 "${HASHES}" --potfile-path "${POTFILE}" --show 2>/dev/null | grep -c "^WPA\*" )
-    [ "$cracked" -ge "$AP_COUNT" ] && ALL_DONE=1 && echo "  ★★★ 全部 ${AP_COUNT} 个 AP 已破解！跳过剩余攻击 ★★★" && return 0
+    # 与 hash 行数比较（同一 AP 可能有多条 22000，不能只用 AP 数）
+    local cracked
+    cracked=$( ${HASHCAT} -m 22000 "${HASHES}" --potfile-path "${POTFILE}" --show 2>/dev/null | grep -cE '^(WPA\*|\$HEX)' || true )
+    cracked=${cracked:-0}
+    if [ "$cracked" -ge "$TOTAL_LINES" ] && [ "$TOTAL_LINES" -gt 0 ]; then
+        ALL_DONE=1
+        echo "  ★★★ 全部 ${TOTAL_LINES} 条 hash 已破解（${AP_COUNT} 个 AP）★★★"
+        return 0
+    fi
     return 1
 }
 
@@ -533,6 +633,8 @@ echo ""
 echo ">>>>>> 阶段1: 高命中率字典 <<<<<<"
 run_dict "wpa-sec真实WiFi密码" "${DICT_DIR}/11-wpa-sec.txt"
 run_dict "Probable WPA 20万" "${DICT_DIR}/probable-wpa.txt"
+# 本地最新合并快打包（cn-sources，优先于大而旧的全表）
+[ -n "${CN_QUICKHIT}" ] && run_dict "CN最新合并快打(8-63)" "${CN_QUICKHIT}"
 run_dict "中国Top100万" "${DICT_DIR}/cn-top100w.txt"
 run_dict "01-top500k" "${DICT_DIR}/01-top500k.txt"
 

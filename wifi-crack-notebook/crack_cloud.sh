@@ -180,6 +180,7 @@ echo ""
 # ── 自动搜索本地定制字典 ──
 CN_CUSTOM=""
 for _p in "${DICT_DIR}/cn_wifi_dict.txt" \
+          "${SCRIPT_DIR}/../wifi-crack-kali/字典工具/cn_wifi_dict.txt" \
           "${SCRIPT_DIR}/../wifi-crack-kali/cn_wifi_dict.txt" \
           "${SCRIPT_DIR}/cn_wifi_dict.txt"; do
     [ -f "$_p" ] && CN_CUSTOM="$_p" && break
@@ -454,9 +455,15 @@ is_done() {
     local now=$(date +%s)
     [ $((now - _LAST_CHECK)) -lt 30 ] && return 1
     _LAST_CHECK=$now
-    # 用 hashcat --show 只统计当前 hash 文件中已破解的条数
-    local cracked=$( ${HASHCAT} -m 22000 "${HASHES}" --potfile-path "${POTFILE}" --show 2>/dev/null | grep -c "^WPA\*" )
-    [ "$cracked" -ge "$AP_COUNT" ] && ALL_DONE=1 && echo "  ★★★ 全部 ${AP_COUNT} 个 AP 已破解！跳过剩余攻击 ★★★" && return 0
+    # 与 hash 行数比较（同一 AP 可能有多条 22000）
+    local cracked
+    cracked=$( ${HASHCAT} -m 22000 "${HASHES}" --potfile-path "${POTFILE}" --show 2>/dev/null | grep -cE '^(WPA\*|\$HEX)' || true )
+    cracked=${cracked:-0}
+    if [ "$cracked" -ge "$TOTAL_LINES" ] && [ "$TOTAL_LINES" -gt 0 ]; then
+        ALL_DONE=1
+        echo "  ★★★ 全部 ${TOTAL_LINES} 条 hash 已破解（${AP_COUNT} 个 AP）★★★"
+        return 0
+    fi
     return 1
 }
 

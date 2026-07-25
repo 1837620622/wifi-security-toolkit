@@ -48,13 +48,15 @@ wifi-crack-notebook/dicts/10-top5m.txt
 
 # hashcat 工作目录（运行时生成）
 wifi-crack-notebook/work/
+mac/work/
+windows/work/
 
 # 握手包（含敏感数据，禁止入库）
 wifi-crack-notebook/captures/
 wifi-crack-notebook/hashes/
+shared/captures/
 *.hc22000
 *.22000
-
 # SSID 定向字典（运行时生成）
 wifi-crack-notebook/dicts/00-ssid-target.txt
 
