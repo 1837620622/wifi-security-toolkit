@@ -129,41 +129,26 @@ hashcat **mode 22000** 统一处理 PMKID（`WPA*01*`）与 EAPOL message pair�
 
 ## 仓库结构
 
+**本地顶层目录名 = GitHub 发布名（已对齐）。** 完整说明见 [`docs/00-目录结构.md`](docs/00-目录结构.md)。
+
 ```text
 wifi-security-toolkit/
-│
-├── shared/                          ★ 跨平台共享（字典 + 握手包）
-│   ├── dicts/  →  wifi-crack-notebook/dicts
-│   ├── captures/                    # 默认放入 .hc22000 / .cap
-│   └── README.md
-│
-├── mac/                             ★ macOS / Apple Silicon 专用
-│   ├── crack.sh                     # 入口（Metal，自动读 shared/dicts）
-│   ├── monitor.sh
-│   └── README.md
-│
-├── win/                         ★ Windows GPU 专用（CUDA/OpenCL）
-│   ├── crack.ps1 / crack.bat        # 入口（自动读 shared\dicts）
-│   └── README.md
-│
-├── wifi-crack-kali/                 # 空口抓包（Kali）
-│   ├── 扫描抓包/  自动攻击/  字典工具/
-│
-├── wifi-crack-notebook/             # 破解引擎本体 + 云脚本 + 真实字典存储
-│   ├── crack_local.sh               # Mac 引擎（支持 --hash/--dict-dir）
-│   ├── crack_cloud.sh               # 算力云 CUDA
-│   └── dicts/                       # 大字典实际目录
-│
-├── docs/
+├── docs/                    # 文档 + assets/
+│   ├── 00-目录结构.md
 │   ├── 01-抓包教程.md
 │   ├── 02-推荐工具.md
-│   ├── 03-字典与握手包目录.md
-│   └── assets/                      # SVG 示意图
+│   └── 03-字典与握手包目录.md
+├── shared/                  # 跨平台：dicts→链接 · captures/
+├── mac/                     # macOS Metal 入口（crack.sh）
+├── win/                     # Windows GPU 入口（crack.ps1）— 勿用 windows/
+├── wifi-crack-kali/         # 抓包：扫描抓包/ · 自动攻击/ · 字典工具/
+├── wifi-crack-notebook/     # 引擎 + dicts/ 实体 + 云脚本
 └── README.md
 ```
 
 | 你是谁 | 从哪开始 |
 |--------|----------|
+| 目录对照 | [`docs/00-目录结构.md`](docs/00-目录结构.md) |
 | 只抓包 | [`docs/01-抓包教程.md`](docs/01-抓包教程.md) + `wifi-crack-kali/` |
 | 用 Mac 爆破 | [`mac/README.md`](mac/README.md) → `bash mac/crack.sh` |
 | 用 Windows 爆破 | [`win/README.md`](win/README.md) → `.\win\crack.ps1` |

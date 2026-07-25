@@ -1,34 +1,31 @@
-# shared — 跨平台共享资源
+# shared — 跨平台共享（与 GitHub 同名）
 
-| 路径 | 说明 |
+| 名称 | 类型 | 说明 |
+|------|------|------|
+| `dicts` | 符号链接 | → `../wifi-crack-notebook/dicts`（字典实体） |
+| `captures/` | 目录 | 默认握手包（.hc22000 / .cap） |
+| `captures_legacy` | 符号链接 | → `../wifi-crack-notebook/captures` |
+| `README.md` | 文件 | 本说明 |
+
+## 入口脚本如何读这里
+
+| 平台 | 命令 |
 |------|------|
-| `dicts/` | **字典与规则**（符号链接到 `wifi-crack-notebook/dicts`） |
-| `captures/` | **默认握手包目录**（.cap / .pcap / .22000 / .hc22000） |
-| `captures_legacy/` | 兼容旧路径 `wifi-crack-notebook/captures` 的链接 |
+| Mac | `bash mac/crack.sh`（默认 `--dict-dir shared/dicts`） |
+| Windows | `.\win\crack.ps1`（默认 `shared\dicts`） |
 
-## 字典位置（重要）
+自定义：
 
-完整路径（本机）：
-
-```text
-shared/dicts/
-  ├── china-wifi.rule              # 中国规则
-  ├── 00-china-wifi-masks.hcmask   # 掩码
-  ├── wpa-top4800.txt / probable-wpa.txt / cn-top100w.txt ...
-  └── cn-sources/latest/           # 新下载源与合并快打包（本地，不入 Git）
-        └── merged/cn-wifi-quickhit-8plus.txt
+```bash
+bash mac/crack.sh --dict-dir /path/to/dicts --hash /path/to/a.hc22000
 ```
 
-Mac / Windows 破解脚本**默认自动读取**本目录。  
-也可用参数覆盖，例如：
+```powershell
+.\win\crack.ps1 -DictDir D:\dicts -Hash D:\hs\a.hc22000
+```
 
-- Mac: `bash mac/crack.sh --dict-dir /path/to/dicts --hash /path/to/a.hc22000`
-- Windows: `.\win\crack.ps1 -DictDir D:\dicts -Hash D:\hs\a.hc22000`
+## 注意
 
-## 握手包放哪里
-
-1. 推荐：`shared/captures/`  
-2. 或运行时指定：`--hash` / `--cap` / `-Hash` / `-Cap`  
-3. 兼容旧位置：`wifi-crack-notebook/captures/`
-
-**勿把真实握手包提交到 Git。**
+- 勿创建 `windows/` 目录；Windows 侧固定为 **`win/`**。  
+- 大字典新下载放在 `wifi-crack-notebook/dicts/cn-sources/latest/`，**文件名勿与现有 dicts 重复**。  
+- 真实握手包不要提交 Git。  
