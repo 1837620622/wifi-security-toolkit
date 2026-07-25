@@ -90,8 +90,11 @@ for _p in "${DICT_DIR}/cn_wifi_dict.txt" \
     [ -f "$_p" ] && CN_CUSTOM="$_p" && break
 done
 
-CN_QUICKHIT="${DICT_DIR}/cn-sources/latest/merged/cn-wifi-quickhit-8plus.txt"
-[ -f "$CN_QUICKHIT" ] || CN_QUICKHIT=""
+# 优先使用整理后的中国 WiFi 8+ 合并包
+CN_QUICKHIT=""
+for _q in     "${DICT_DIR}/cn-sources/ready/00-priority-cn-wifi-8plus.txt"     "${DICT_DIR}/cn-sources/ready/03-batch3-NEW-only-8plus.txt"     "${DICT_DIR}/cn-sources/ready/01-batch1-quickhit-8plus.txt"     "${DICT_DIR}/cn-sources/latest/merged/cn-wifi-quickhit-8plus.txt"; do
+    if [ -f "$_q" ]; then CN_QUICKHIT="$_q"; break; fi
+done
 
 echo "============================================"
 echo "  WiFi 中国密码专用破解 v6.2  [Mac Metal]"
