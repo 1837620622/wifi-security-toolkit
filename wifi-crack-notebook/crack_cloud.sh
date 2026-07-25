@@ -402,35 +402,32 @@ echo ""
 POTFILE="${WORK_DIR}/hashcat.potfile"
 OUTFILE="${WORK_DIR}/cracked.txt"
 
-# --force: 兼容 hashcat v6.2.5 的 OpenCL 后端警告
-# -w 4: RTX 3090 满负载工作模式（云端无桌面，不影响交互）
-# -D 1,2: 同时使用 CUDA 和 OpenCL 后端
-HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 4 -D 1,2 --force --status --status-timer 15 --hwmon-temp-abort=90"
+# -w 4: 云端高负载；默认 CUDA(-D 2)；需要兼容时 export HC_FORCE=1
+HC_FORCE_FLAG=()
+[ "${HC_FORCE:-0}" = "1" ] && HC_FORCE_FLAG=(--force)
+HC_BASE="${HASHCAT} -m 22000 ${HASHES} --potfile-path ${POTFILE} --outfile ${OUTFILE} --outfile-format 2 -w 4 -D 2 ${HC_FORCE_FLAG[@]+"${HC_FORCE_FLAG[@]}"} --status --status-timer 15 --hwmon-temp-abort=90"
 
-# 查找规则文件（自动搜索所有 homebrew/系统路径）
-RULE_BEST64=""
-for rp in $(find /opt/homebrew /usr/local /usr/share -path '*/hashcat/rules/best64.rule' 2>/dev/null) \
-          "${DICT_DIR}/best64.rule"; do
-    [ -f "$rp" ] && RULE_BEST64="$rp" && break
-done
+# 查找规则：系统路径优先，其次字典目录，最后 homebrew
+_find_rule() {
+    local name="$1" p
+    for p in \
+        "/usr/share/hashcat/rules/${name}" \
+        "/usr/local/share/hashcat/rules/${name}" \
+        "${DICT_DIR}/${name}"; do
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    done
+    p=$(find /usr/share/hashcat/rules /usr/local/share/hashcat/rules -name "${name}" 2>/dev/null | head -1)
+    [ -n "$p" ] && [ -f "$p" ] && { echo "$p"; return 0; }
+    p=$(find /opt/homebrew /usr/local -path "*/hashcat/rules/${name}" 2>/dev/null | head -1)
+    [ -n "$p" ] && [ -f "$p" ] && { echo "$p"; return 0; }
+    return 1
+}
+
+RULE_BEST64="$(_find_rule best64.rule || true)"
 RULE_CHINA="${DICT_DIR}/china-wifi.rule"
 MASK_CHINA="${DICT_DIR}/00-china-wifi-masks.hcmask"
-
-# 查找 OneRuleToRuleThemAll / dive.rule 等高级规则
-RULE_ONERULE=""
-for rp in $(find /opt/homebrew /usr/local /usr/share -path '*/hashcat/rules/OneRuleToRuleThemAll.rule' 2>/dev/null) \
-          $(find /opt/homebrew /usr/local /usr/share -path '*/hashcat/rules/dive.rule' 2>/dev/null) \
-          "${DICT_DIR}/OneRuleToRuleThemAll.rule" \
-          "${DICT_DIR}/dive.rule"; do
-    [ -f "$rp" ] && RULE_ONERULE="$rp" && break
-done
-
-# 查找 toggles 规则 (大小写穷举)
-RULE_TOGGLES=""
-for rp in $(find /opt/homebrew /usr/local /usr/share -path '*/hashcat/rules/toggles*.rule' 2>/dev/null | head -1) \
-          "${DICT_DIR}/toggles5.rule"; do
-    [ -f "$rp" ] && RULE_TOGGLES="$rp" && break
-done
+RULE_ONERULE="$(_find_rule OneRuleToRuleThemAll.rule || _find_rule dive.rule || true)"
+RULE_TOGGLES="$(_find_rule toggles5.rule || true)"
 
 # ── 已破解统计 ──
 show_cracked() {
