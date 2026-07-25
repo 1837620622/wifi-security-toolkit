@@ -142,7 +142,7 @@ wifi-security-toolkit/
 │   ├── monitor.sh
 │   └── README.md
 │
-├── windows/                         ★ Windows GPU 专用（CUDA/OpenCL）
+├── win/                         ★ Windows GPU 专用（CUDA/OpenCL）
 │   ├── crack.ps1 / crack.bat        # 入口（自动读 shared\dicts）
 │   └── README.md
 │
@@ -166,7 +166,7 @@ wifi-security-toolkit/
 |--------|----------|
 | 只抓包 | [`docs/01-抓包教程.md`](docs/01-抓包教程.md) + `wifi-crack-kali/` |
 | 用 Mac 爆破 | [`mac/README.md`](mac/README.md) → `bash mac/crack.sh` |
-| 用 Windows 爆破 | [`windows/README.md`](windows/README.md) → `.\windows\crack.ps1` |
+| 用 Windows 爆破 | [`win/README.md`](win/README.md) → `.\win\crack.ps1` |
 | 租 GPU 云 | `wifi-crack-notebook/crack_cloud.sh` |
 | 查字典放哪 | [`docs/03-字典与握手包目录.md`](docs/03-字典与握手包目录.md) |
 | 工具选型 | [`docs/02-推荐工具.md`](docs/02-推荐工具.md) |
@@ -256,7 +256,7 @@ bash mac/crack.sh --hash ./a.hc22000 --dict-dir ./shared/dicts
 **（3）Windows 本地（CUDA/OpenCL）**
 
 ```powershell
-cd windows
+cd win
 .\crack.ps1
 .\crack.ps1 -Hash D:\a.hc22000 -DictDir D:\dicts
 ```

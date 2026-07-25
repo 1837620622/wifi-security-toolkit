@@ -23,7 +23,7 @@ Mac / Windows 破解脚本**默认自动读取**本目录。
 也可用参数覆盖，例如：
 
 - Mac: `bash mac/crack.sh --dict-dir /path/to/dicts --hash /path/to/a.hc22000`
-- Windows: `.\windows\crack.ps1 -DictDir D:\dicts -Hash D:\hs\a.hc22000`
+- Windows: `.\win\crack.ps1 -DictDir D:\dicts -Hash D:\hs\a.hc22000`
 
 ## 握手包放哪里
 

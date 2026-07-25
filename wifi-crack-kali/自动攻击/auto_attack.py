@@ -717,7 +717,7 @@ def run_crack_pipeline(pcap_path, hash_path, bssid_target):
         print("  bash mac/crack.sh --hash '%s'" % hash_path)
         print()
         print("  \033[93m# 3) Windows CUDA\033[0m")
-        print("  .\\windows\\crack.ps1 -Hash '%s'" % hash_path)
+        print("  .\\win\\crack.ps1 -Hash '%s'" % hash_path)
         print()
         print("  \033[93m# 4) 算力云\033[0m")
         print("  bash wifi-crack-notebook/crack_cloud.sh")

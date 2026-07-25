@@ -132,7 +132,7 @@ case "$answer" in
                 ok "Hash 提取成功!"
                 info "hashcat 8位纯数字掩码（可选试跑）..."
                 hashcat -m 22000 -a 3 "$HASH_FILE" '?d?d?d?d?d?d?d?d' --potfile-disable 2>&1 | tail -10 || true
-                ok "建议拷贝到 shared/captures 后用 mac/crack.sh 或 windows/crack.ps1"
+                ok "建议拷贝到 shared/captures 后用 mac/crack.sh 或 win/crack.ps1"
             fi
         fi
         ;;
