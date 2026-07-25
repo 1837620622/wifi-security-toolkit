@@ -15,9 +15,12 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DICT_DIR="${SCRIPT_DIR}/dicts"
 WORK_DIR="${SCRIPT_DIR}/work/xiaomi_a380"
-HASH_FILE="${SCRIPT_DIR}/captures/combined.hc22000"
+# 支持: bash crack_xiaomi_a380_resume.sh [hash文件]
+HASH_FILE="${1:-${SCRIPT_DIR}/captures/combined.hc22000}"
+# session 文件放到 work 下，避免绑定 Homebrew Cellar 版本路径
+export HASHCAT_SESSION_PATH="${HASHCAT_SESSION_PATH:-${WORK_DIR}/sessions}"
 
-mkdir -p "${WORK_DIR}"
+mkdir -p "${WORK_DIR}" "${HASHCAT_SESSION_PATH}"
 
 # ── 固定 session 名（断电后 --restore 用同一个名字恢复）──
 SESSION_NAME="xiaomi_a380_crack"
@@ -84,11 +87,17 @@ run_round() {
 }
 
 # ── 检查是否有未完成的 session 可以恢复 ──
-check_restore() {
-    # hashcat 的 restore 文件
-    local restore_dir="/opt/homebrew/Cellar/hashcat/7.1.2/share/hashcat/sessions"
-    if [ -f "${restore_dir}/${SESSION_NAME}.restore" ]; then
-        log ">>> 发现未完成的 session，尝试恢复..."
+try_restore_session() {
+    local restore_file="${HASHCAT_SESSION_PATH}/${SESSION_NAME}.restore"
+    if [ -f "${restore_file}" ]; then
+        log ">>> 发现未完成 session: ${restore_file}"
+        log ">>> 执行 hashcat --restore ..."
+        ${HASHCAT} --session "${SESSION_NAME}" --restore 2>&1 | tee -a "${LOG_FILE}" || true
+        show_cracked
+        if check_if_cracked; then
+            log "恢复后已全部破解，退出"
+            exit 0
+        fi
         return 0
     fi
     return 1
@@ -100,11 +109,15 @@ check_restore() {
 : > "${LOG_FILE}"
 log "============================================"
 log "  Xiaomi_A380 断电安全破解"
+log "  Hash: ${HASH_FILE}"
 log "  字典: china-wifi-ultra ($(wc -l < "${BIG_DICT}" 2>/dev/null || echo 0) 条)"
+log "  Session: ${HASHCAT_SESSION_PATH}/${SESSION_NAME}"
 log "============================================"
 
 if [ ! -f "${HASH_FILE}" ]; then
-    log "[!] 找不到 hash 文件"; exit 1
+    log "[!] 找不到 hash 文件: ${HASH_FILE}"
+    log "    用法: bash crack_xiaomi_a380_resume.sh [path/to.hc22000]"
+    exit 1
 fi
 if [ ! -f "${BIG_DICT}" ]; then
     log "[!] 找不到超大字典: ${BIG_DICT}"; exit 1
@@ -115,6 +128,9 @@ if check_if_cracked; then
     show_cracked
     exit 0
 fi
+
+# 尝试恢复未完成 session
+try_restore_session || true
 
 # 查找规则文件
 RULE_BEST64=""

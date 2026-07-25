@@ -30,7 +30,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DICT_DIR="${SCRIPT_DIR}/dicts"
 WORK_DIR="${SCRIPT_DIR}/work/xiaomi_a380"
-HASH_FILE="${SCRIPT_DIR}/captures/combined.hc22000"
+# 支持: bash crack_xiaomi_a380.sh [hash文件]
+HASH_FILE="${1:-${SCRIPT_DIR}/captures/combined.hc22000}"
 
 mkdir -p "${WORK_DIR}"
 

